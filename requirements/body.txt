@@ -1,0 +1,6 @@
+# venv body — YOLOv8 (ultralytics) + CLIP zero-shot (open_clip)
+# NB : torch/torchvision sont installés par install.sh (index CPU par défaut, --gpu sinon).
+opencv-python>=4.9
+ultralytics>=8.2
+open_clip_torch>=2.24
+tqdm>=4.66
