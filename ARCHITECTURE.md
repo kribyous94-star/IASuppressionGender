@@ -142,16 +142,22 @@ La fusion produit des plages en secondes, exportables en JSON
   "created": "2026-07-11T12:00:00",
   "settings": {"detectors": ["face", "body"], "stride": 3, "…": "…"},
   "ranges": [
-    {"start": 1.2, "end": 3.48, "enabled": true},
-    {"start": 10.0, "end": 12.5, "enabled": false}
+    {"start": 1.2, "end": 3.48,
+     "start_hms": "0:00:01.200", "end_hms": "0:00:03.480", "enabled": true},
+    {"start": 10.0, "end": 12.5,
+     "start_hms": "0:00:10.000", "end_hms": "0:00:12.500", "enabled": false}
   ]
 }
 ```
 
 Ce fichier est le **format d'échange éditable** : on peut désactiver une plage
 (`enabled: false`), ajuster `start`/`end`, ou ajouter une entrée — à la main,
-ou via le tableau de l'interface. `pipeline.render_from_ranges()` (CLI :
-`--ranges fichier.json`) rend ensuite la vidéo sans relancer la détection.
+ou via le tableau de l'interface (qui sait aussi l'importer pour sauter
+l'analyse). `start`/`end` font foi et acceptent un nombre de secondes **ou**
+une chaîne « h:mm:ss.mmm » (conversions dans `src/timefmt.py`) ;
+`start_hms`/`end_hms` sont des équivalents lisibles, régénérés à chaque
+écriture. `pipeline.render_from_ranges()` (CLI : `--ranges fichier.json`)
+rend ensuite la vidéo sans relancer la détection.
 Les sorties sont sélectionnables : vidéo, fichier de plages, ou les deux
 (CLI : `--out video|plages|both` ; interface : cases à cocher).
 

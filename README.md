@@ -48,12 +48,15 @@ navigateur, en deux étapes :
 
 1. **Analyser** : glissez une vidéo, choisissez le genre à supprimer (réglages
    avancés dans l'accordéon), suivez le journal en direct. L'analyse produit
-   un **tableau de plages** (début/fin en secondes).
+   un **tableau de plages** (début/fin affichés **en secondes et en
+   h:mm:ss.mmm**, les deux formats éditables et synchronisés). Alternative
+   sans analyse : **importer un fichier de plages** existant (accordéon
+   « …ou importer des plages existantes »).
 2. **Éditer puis générer** : dans le tableau, décochez une plage pour la
-   désactiver, modifiez son début/sa fin, ou ajoutez-en une (➕). Choisissez
-   les sorties — **vidéo censurée**, **fichier de plages (JSON)**, ou les
-   deux — puis générez (aucune nouvelle analyse, c'est immédiat). Les sorties
-   vont dans `output/`.
+   désactiver, modifiez son début/sa fin (en secondes ou en h:mm:ss), ou
+   ajoutez-en une (➕). Choisissez les sorties — **vidéo censurée**,
+   **fichier de plages (JSON)**, ou les deux — puis générez (aucune nouvelle
+   analyse, c'est immédiat). Les sorties vont dans `output/`.
 
 Options : `--port N`, `--no-browser`.
 

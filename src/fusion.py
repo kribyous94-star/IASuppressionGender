@@ -5,6 +5,11 @@ fichier de plages éditable. Biais assumé vers le faux positif : mieux vaut une
 frame noire en trop qu'un individu du genre ciblé visible une frame.
 """
 import math
+import sys
+from pathlib import Path
+
+sys.path.insert(0, str(Path(__file__).resolve().parent))
+from timefmt import parse_time  # noqa: E402
 
 OTHER = {"male": "female", "female": "male"}
 
@@ -72,17 +77,15 @@ def spans_to_seconds(spans, fps):
 def seconds_to_frames(ranges, fps, total_frames):
     """Plages en secondes (éventuellement éditées à la main) → set de frames.
 
+    start/end acceptent un nombre de secondes ou une chaîne « h:mm:ss.mmm ».
     Les plages désactivées (enabled: false) ou invalides sont ignorées.
     """
     frames = set()
     for r in ranges:
         if not r.get("enabled", True):
             continue
-        try:
-            start, end = float(r["start"]), float(r["end"])
-        except (KeyError, TypeError, ValueError):
-            continue
-        if end <= start:
+        start, end = parse_time(r.get("start")), parse_time(r.get("end"))
+        if start is None or end is None or end <= start:
             continue
         a = max(0, int(start * fps))
         b = min(total_frames - 1, math.ceil(end * fps) - 1)

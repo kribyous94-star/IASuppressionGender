@@ -21,6 +21,7 @@ sys.path.insert(0, str(ROOT / "src"))
 from fusion import (fuse, seconds_to_frames, spans_to_frames,  # noqa: E402
                     spans_to_seconds)
 from render import render  # noqa: E402
+from timefmt import fmt_hms, parse_time  # noqa: E402
 
 # Registre des détecteurs : en ajouter un = ajouter une entrée ici
 # (+ son venv dans install.sh et son script dans src/detectors/).
@@ -112,9 +113,21 @@ def video_meta(video):
 
 def write_ranges_file(path, video, gender, fps, total_frames, ranges,
                       settings=None):
-    """Écrit le fichier de plages (JSON éditable, cf. ARCHITECTURE.md §4.6)."""
+    """Écrit le fichier de plages (JSON éditable, cf. ARCHITECTURE.md §4.5).
+
+    start/end (secondes) font foi ; start_hms/end_hms sont des équivalents
+    lisibles, régénérés à chaque écriture. À l'édition, start/end acceptent
+    aussi une chaîne « h:mm:ss.mmm ».
+    """
     path = Path(path)
     path.parent.mkdir(parents=True, exist_ok=True)
+    ranges = [{
+        "start": (s := round(parse_time(r.get("start")) or 0.0, 3)),
+        "end": (e := round(parse_time(r.get("end")) or 0.0, 3)),
+        "start_hms": fmt_hms(s),
+        "end_hms": fmt_hms(e),
+        "enabled": bool(r.get("enabled", True)),
+    } for r in ranges]
     data = {
         "video": str(video),
         "gender": gender,
