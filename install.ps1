@@ -92,13 +92,13 @@ foreach ($d in @("$ROOT\venvs", "$ROOT\models", "$ROOT\.cache", "$ROOT\output", 
 make_venv core
 info "venv core : orchestration + interface (opencv, gradio, ffmpeg statique, ...)"
 
-# numpy : purger le sdist éventuellement en cache puis forcer le wheel binaire.
-# Sans ça, Meson compile depuis les sources → Defender bloque le binaire de test
-# dans %TEMP% avec "Accès refusé" / Win64:MalwareX-gen (faux positif).
+# numpy : purge le sdist en cache puis force le wheel binaire.
+# Sans ca, Meson compile depuis les sources -> Defender bloque le binaire de test
+# dans %TEMP% (faux positif Win64:MalwareX-gen sur sanitycheckcpp.exe).
 & "$ROOT\venvs\core\Scripts\pip.exe" cache remove numpy 2>$null
 & "$ROOT\venvs\core\Scripts\pip.exe" install --only-binary :all: "numpy<2.3"
 if ($LASTEXITCODE -ne 0) {
-    err "Impossible d'installer le wheel numpy. Vérifiez votre version de Python (3.10–3.13 requis)."
+    err "Impossible d'installer le wheel numpy. Verifiez votre version de Python (3.10-3.13 requis)."
 }
 
 pipin core -r "$ROOT\requirements\core.txt"
