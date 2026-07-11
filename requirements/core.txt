@@ -4,3 +4,5 @@ opencv-python>=4.9
 imageio-ffmpeg>=0.5
 tqdm>=4.66
 gradio>=5
+psutil>=5.9        # moniteur CPU/RAM de l'interface
+nvidia-ml-py>=12   # moniteur GPU/VRAM (inoffensif sans GPU NVIDIA)

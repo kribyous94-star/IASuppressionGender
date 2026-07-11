@@ -18,6 +18,7 @@ import threading
 from pathlib import Path
 
 import gradio as gr
+import psutil
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 from pipeline import (DETECTORS, ROOT, render_from_ranges,  # noqa: E402
@@ -30,6 +31,49 @@ OUT_RANGES = "Fichier de plages (JSON)"
 TABLE_HEADERS = ["Début (s)", "Fin (s)", "Début (h:m:s)", "Fin (h:m:s)",
                  "Active"]
 LOG_MAX_LINES = 60
+
+
+_nvml = {"handle": None, "tried": False}
+
+
+def _nvml_handle():
+    """Handle NVML du premier GPU NVIDIA (None si absent/inutilisable)."""
+    if not _nvml["tried"]:
+        _nvml["tried"] = True
+        try:
+            import pynvml
+            pynvml.nvmlInit()
+            _nvml["handle"] = pynvml.nvmlDeviceGetHandleByIndex(0)
+        except Exception:
+            _nvml["handle"] = None
+    return _nvml["handle"]
+
+
+def _gauge(label, pct):
+    if pct is None:
+        return f"<span style='opacity:.6'>{label} —</span>"
+    color = "#22a559" if pct < 60 else "#e0a800" if pct < 85 else "#dc3545"
+    return (f"<span>{label} <b style='color:{color}'>{pct:.0f} %</b></span>")
+
+
+def system_stats():
+    """Ligne HTML : utilisation CPU / RAM / GPU / VRAM en pourcentage."""
+    cpu = psutil.cpu_percent()
+    ram = psutil.virtual_memory().percent
+    gpu = vram = None
+    handle = _nvml_handle()
+    if handle is not None:
+        try:
+            import pynvml
+            gpu = float(pynvml.nvmlDeviceGetUtilizationRates(handle).gpu)
+            mem = pynvml.nvmlDeviceGetMemoryInfo(handle)
+            vram = 100.0 * mem.used / mem.total
+        except Exception:
+            pass
+    parts = [_gauge("CPU", cpu), _gauge("RAM", ram),
+             _gauge("GPU", gpu), _gauge("VRAM", vram)]
+    return ("<div style='display:flex;gap:1.5em;font-family:monospace;"
+            "font-size:.9em;padding:2px 0'>" + "".join(parts) + "</div>")
 
 
 def _stream(worker_fn):
@@ -238,6 +282,9 @@ def build_app():
 
         state = gr.State()
         prev_table = gr.State()
+        monitor = gr.HTML(system_stats())
+        timer = gr.Timer(2)
+        timer.tick(system_stats, outputs=[monitor], show_progress="hidden")
         with gr.Row():
             with gr.Column():
                 video_in = gr.Video(label="Vidéo d'entrée", sources=["upload"])
