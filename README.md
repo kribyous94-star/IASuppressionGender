@@ -29,14 +29,33 @@ de cas : visage visible, visage caché, personne de dos, personne partielle, etc
 Nécessite : `python3` (≥ 3.10) avec le module `venv`, et une connexion internet
 **pour l'installation uniquement** (~2 à 3 Go de téléchargements : torch, modèles).
 
+Avec `--gpu`, les bibliothèques CUDA sont installées **via pip dans les venvs**
+(rien au niveau système, la contrainte « tout dans le dossier » est conservée) ;
+seul le pilote NVIDIA doit être présent. L'installeur vérifie que le GPU est
+réellement utilisable et se replie automatiquement sur le CPU sinon. Relancer
+`install.sh` avec ou sans `--gpu` bascule proprement entre les deux variantes.
+
 ## Utilisation
 
+### Interface graphique (recommandé)
+
 ```bash
-./run.sh -i video.mp4 -g femme                 # noircit les frames contenant une femme
-./run.sh -i video.mp4 -g homme -o resultat.mp4 # idem pour un homme, sortie nommée
+./run.sh
 ```
 
-Options principales (voir `./run.sh --help` pour tout) :
+Ouvre une interface web **locale** (127.0.0.1, aucun accès externe) dans le
+navigateur : glissez une vidéo, choisissez le genre à supprimer, ajustez les
+réglages avancés si besoin, suivez le journal en direct et prévisualisez le
+résultat (écrit dans `output/`). Options : `--port N`, `--no-browser`.
+
+### Ligne de commande
+
+```bash
+./cli.sh -i video.mp4 -g femme                 # noircit les frames contenant une femme
+./cli.sh -i video.mp4 -g homme -o resultat.mp4 # idem pour un homme, sortie nommée
+```
+
+Options principales (voir `./cli.sh --help` pour tout) :
 
 | Option | Défaut | Rôle |
 |---|---|---|
@@ -71,10 +90,13 @@ Détails complets : [ARCHITECTURE.md](ARCHITECTURE.md).
 ```
 IASuppressionGender/
 ├── install.sh            # installe venvs + modèles, tout DANS le dossier
-├── run.sh                # lance le logiciel (mode offline forcé)
+├── run.sh                # lance l'interface graphique (mode offline forcé)
+├── cli.sh                # lance la ligne de commande (mode offline forcé)
 ├── requirements/         # dépendances par venv (core/face/body)
 ├── src/
-│   ├── main.py           # orchestrateur CLI (venv core)
+│   ├── pipeline.py       # moteur : détecteurs → fusion → rendu (venv core)
+│   ├── main.py           # CLI (utilise pipeline.py)
+│   ├── ui.py             # interface graphique locale (utilise pipeline.py)
 │   ├── fusion.py         # combinaison des détections + lissage temporel
 │   ├── render.py         # écriture vidéo noircie + remux audio
 │   └── detectors/        # scripts autonomes, un par venv de détection
@@ -82,7 +104,8 @@ IASuppressionGender/
 │       └── body_detector.py
 ├── venvs/                # (généré) venvs isolés — non versionné
 ├── models/               # (généré) poids des modèles IA — non versionné
-├── .cache/               # (généré) caches pip/HF/torch — non versionné
+├── .cache/               # (généré) caches pip/HF/torch/gradio — non versionné
+├── output/               # (généré) vidéos produites par l'interface
 └── work/                 # (généré) fichiers intermédiaires d'un job
 ```
 

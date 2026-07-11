@@ -9,10 +9,14 @@ Contrat CLI/JSON : voir ARCHITECTURE.md §4.1.
 """
 import argparse
 import json
+import os
 
 import cv2
 import torch
 from tqdm import tqdm
+
+# mode 'plain' (interface) : lignes de progression simples au lieu de tqdm
+PLAIN = os.environ.get("IASG_PROGRESS") == "plain"
 
 MALE_PROMPTS = [
     "a photo of a man",
@@ -76,6 +80,7 @@ def main():
     args = p.parse_args()
 
     device = "cuda" if torch.cuda.is_available() else "cpu"
+    print(f"exécution sur {'GPU (CUDA)' if device == 'cuda' else 'CPU'}", flush=True)
     from ultralytics import YOLO
     yolo = YOLO(f"{args.project_root}/models/yolo/yolov8s.pt")
     clf = GenderClassifier(args.project_root, device)
@@ -88,11 +93,14 @@ def main():
 
     frames = {}
     idx = 0
-    with tqdm(total=total, desc="[body]", unit="f") as bar:
+    step = max(1, total // 20)
+    with tqdm(total=total, desc="[body]", unit="f", disable=PLAIN) as bar:
         while True:
             ok, frame = cap.read()
             if not ok:
                 break
+            if PLAIN and idx % step == 0:
+                print(f"{idx}/{total} frames", flush=True)
             if idx % args.stride == 0:
                 dets = analyze_frame(frame, yolo, clf, device)
                 if dets:

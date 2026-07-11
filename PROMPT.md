@@ -46,9 +46,14 @@ projet, briefer un autre agent, ou vérifier que le logiciel répond bien au bes
 >
 > **Livrables.**
 > - `install.sh` : installe tout (venvs, dépendances, téléchargement des
->   modèles), idempotent, avec option `--gpu`.
-> - `run.sh` : lance le logiciel (`./run.sh -i video.mp4 -g femme`).
-> - Code source structuré (orchestrateur, détecteurs, fusion, rendu).
+>   modèles, libs CUDA via pip pour `--gpu`), idempotent, bascule CPU ↔ GPU.
+> - `run.sh` : lance une interface graphique locale (hors ligne) qui facilite
+>   l'utilisation : choix de la vidéo, du genre, réglages avancés, journal en
+>   direct, prévisualisation du résultat.
+> - `cli.sh` : la même chose en ligne de commande
+>   (`./cli.sh -i video.mp4 -g femme`).
+> - Code source structuré (moteur partagé CLI/interface, détecteurs, fusion,
+>   rendu).
 > - `README.md` (usage) et `ARCHITECTURE.md` (conception détaillée).
 > - Historique **git** propre : un commit par étape logique (docs, scripts,
 >   code), messages conventionnels.

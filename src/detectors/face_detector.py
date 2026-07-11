@@ -7,9 +7,13 @@ Contrat CLI/JSON : voir ARCHITECTURE.md §4.1.
 """
 import argparse
 import json
+import os
 
 import cv2
 from tqdm import tqdm
+
+# mode 'plain' (interface) : lignes de progression simples au lieu de tqdm
+PLAIN = os.environ.get("IASG_PROGRESS") == "plain"
 
 
 def main():
@@ -20,12 +24,18 @@ def main():
     p.add_argument("--project-root", required=True)
     args = p.parse_args()
 
+    import onnxruntime as ort
+    cuda = "CUDAExecutionProvider" in ort.get_available_providers()
+    providers = (["CUDAExecutionProvider", "CPUExecutionProvider"]
+                 if cuda else ["CPUExecutionProvider"])
+
     from insightface.app import FaceAnalysis
     app = FaceAnalysis(name="buffalo_l",
                        root=f"{args.project_root}/models/insightface",
                        allowed_modules=["detection", "genderage"],
-                       providers=["CPUExecutionProvider"])
-    app.prepare(ctx_id=-1, det_size=(640, 640))
+                       providers=providers)
+    app.prepare(ctx_id=0 if cuda else -1, det_size=(640, 640))
+    print(f"exécution sur {'GPU (CUDA)' if cuda else 'CPU'}", flush=True)
 
     cap = cv2.VideoCapture(args.video)
     if not cap.isOpened():
@@ -35,11 +45,14 @@ def main():
 
     frames = {}
     idx = 0
-    with tqdm(total=total, desc="[face]", unit="f") as bar:
+    step = max(1, total // 20)
+    with tqdm(total=total, desc="[face]", unit="f", disable=PLAIN) as bar:
         while True:
             ok, frame = cap.read()
             if not ok:
                 break
+            if PLAIN and idx % step == 0:
+                print(f"{idx}/{total} frames", flush=True)
             if idx % args.stride == 0:
                 dets = []
                 for face in app.get(frame):

@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
-# IASuppressionGender — lance l'interface graphique (servie sur 127.0.0.1,
-# 100 % hors ligne). Options : --port N, --no-browser.
-# Pour la ligne de commande : ./cli.sh -i video.mp4 -g femme
+# IASuppressionGender — ligne de commande (100 % hors ligne).
+# Exemple : ./cli.sh -i video.mp4 -g femme
+# Pour l'interface graphique : ./run.sh
 set -euo pipefail
 
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
@@ -14,11 +14,9 @@ export HF_HOME="$ROOT/.cache/huggingface"
 export TORCH_HOME="$ROOT/.cache/torch"
 export XDG_CACHE_HOME="$ROOT/.cache/xdg"
 export YOLO_CONFIG_DIR="$ROOT/.cache/ultralytics"
-export GRADIO_TEMP_DIR="$ROOT/.cache/gradio"
-mkdir -p "$YOLO_CONFIG_DIR" "$GRADIO_TEMP_DIR" "$ROOT/output"
+mkdir -p "$YOLO_CONFIG_DIR"
 export HF_HUB_OFFLINE=1
 export TRANSFORMERS_OFFLINE=1
 export YOLO_OFFLINE=1
-export GRADIO_ANALYTICS_ENABLED=0
 
-exec "$PY" "$ROOT/src/ui.py" "$@"
+exec "$PY" "$ROOT/src/main.py" "$@"

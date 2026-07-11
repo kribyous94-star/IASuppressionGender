@@ -20,12 +20,14 @@ audio conservé. Tout doit fonctionner hors ligne et être contenu dans le dossi
 
 ```
 venvs/
-├── core/   # orchestration + rendu : opencv-python, numpy, imageio-ffmpeg, tqdm
+├── core/   # orchestration + rendu + interface : opencv, gradio, imageio-ffmpeg
 ├── face/   # insightface + onnxruntime (détection visage + attribut genre)
 └── body/   # torch + ultralytics (YOLOv8) + open_clip_torch (genre corps entier)
 ```
 
-- `core` est le point d'entrée (`src/main.py`). Il ne charge aucun modèle IA.
+- `core` héberge les deux points d'entrée — `src/ui.py` (interface, `./run.sh`)
+  et `src/main.py` (CLI, `./cli.sh`) — qui appellent le même moteur
+  `src/pipeline.py`. Il ne charge aucun modèle IA.
 - `face` et `body` sont lancés par `core` en sous-processus :
   `venvs/<nom>/bin/python src/detectors/<nom>_detector.py …`
 - Isolation stricte : `face` (onnxruntime) et `body` (torch) ont des piles
@@ -35,8 +37,12 @@ venvs/
 ## 4. Pipeline
 
 ```
+      run.sh → ui.py (interface web locale, gradio)
+      cli.sh → main.py (ligne de commande)
+                    │ tous deux appellent
+                    ▼
                     ┌───────────────────────────────┐
- video.mp4 ────────►│  main.py (venv core)          │
+ video.mp4 ────────►│  pipeline.run_job (venv core) │
  genre cible        └───────────────┬───────────────┘
                                     │ sous-processus (1 par détecteur)
               ┌─────────────────────┼─────────────────────┐
@@ -134,7 +140,7 @@ Sortie (seules les frames avec détections apparaissent) :
 
 ### 5.1 `install.sh`
 
-1. Vérifie `python3 -m venv`.
+1. Vérifie `python3 -m venv` (et `nvidia-smi` si `--gpu`).
 2. Force tous les caches dans le dossier : `PIP_CACHE_DIR`, `HF_HOME`,
    `TORCH_HOME`, `XDG_CACHE_HOME` → `./.cache/`.
 3. Crée `venvs/core`, `venvs/face`, `venvs/body` et installe
@@ -144,19 +150,34 @@ Sortie (seules les frames avec détections apparaissent) :
    - `models/insightface/models/buffalo_l/` (InsightFace)
    - `models/yolo/yolov8s.pt` (Ultralytics)
    - `models/openclip/` (poids CLIP via HF hub, `cache_dir` forcé)
-5. Idempotent : relançable sans tout retélécharger.
+5. Idempotent : relançable sans tout retélécharger, et bascule proprement
+   CPU ↔ GPU (désinstalle la variante opposée de torch/onnxruntime, qui ne
+   peuvent pas cohabiter dans un même venv).
 
-### 5.2 `run.sh`
+**Mode GPU auto-contenu.** Aucune installation CUDA système n'est requise :
+les bibliothèques CUDA (cudart, cublas, cudnn, cufft, curand, nvrtc) sont
+installées **via pip dans le venv** concerné. Comme onnxruntime ne les trouve
+pas tout seul, `pipeline.detector_env()` construit le `LD_LIBRARY_PATH` du
+sous-processus à partir des dossiers `site-packages/nvidia/*/lib` du venv
+(torch, lui, référence ses libs par RPATH). Après installation, un test
+d'import vérifie que le GPU est réellement utilisable ; sinon repli
+automatique sur la variante CPU avec avertissement.
 
-Exporte les mêmes variables de cache + `HF_HUB_OFFLINE=1`, puis
-`exec venvs/core/bin/python src/main.py "$@"`.
+### 5.2 `run.sh` (interface) et `cli.sh` (ligne de commande)
+
+Les deux exportent les mêmes variables de cache + `HF_HUB_OFFLINE=1`, puis :
+- `run.sh` → `venvs/core/bin/python src/ui.py "$@"` : interface web locale
+  (gradio, servie sur 127.0.0.1 uniquement, `GRADIO_TEMP_DIR` dans `./.cache/`,
+  analytics désactivées). Journal en direct, sorties dans `./output/`.
+- `cli.sh` → `venvs/core/bin/python src/main.py "$@"` : la CLI historique.
 
 ## 6. Ajouter un détecteur (checklist)
 
 1. `requirements/<nom>.txt` + création du venv dans `install.sh`.
 2. `src/detectors/<nom>_detector.py` respectant le contrat CLI/JSON (§4.1).
-3. Déclarer le détecteur dans le registre `DETECTORS` de `src/main.py`
-   (nom → venv + script + seuil par défaut).
+3. Déclarer le détecteur dans le registre `DETECTORS` de `src/pipeline.py`
+   (nom → venv + script + seuil par défaut). La CLI et l'interface le
+   proposeront automatiquement.
 
 Candidats futurs : estimation de pose + classification de démarche,
 MiVOLO (genre/âge corps+visage), segmentation pour noircir seulement la
