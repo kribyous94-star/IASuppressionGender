@@ -80,6 +80,10 @@ $env:HF_HOME         = "$ROOT\.cache\huggingface"
 $env:TORCH_HOME      = "$ROOT\.cache\torch"
 $env:YOLO_CONFIG_DIR = "$ROOT\.cache\ultralytics"
 
+# Préférer les wheels binaires précompilés pour éviter la compilation
+# depuis les sources (risque de blocage par Windows Defender dans %TEMP%).
+$env:PIP_PREFER_BINARY = "1"
+
 foreach ($d in @("$ROOT\venvs", "$ROOT\models", "$ROOT\.cache", "$ROOT\output", $env:YOLO_CONFIG_DIR)) {
     if (-not (Test-Path $d)) { New-Item -ItemType Directory -Force $d | Out-Null }
 }
