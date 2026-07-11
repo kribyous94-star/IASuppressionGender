@@ -1,23 +1,27 @@
-# IASuppressionGender — installation auto-contenue (Windows).
-# Tout (venvs, modèles, caches) est installé DANS le dossier du projet :
+# IASuppressionGender -- installation auto-contenue (Windows).
+# Tout (venvs, modeles, caches) est installe DANS le dossier du projet :
 # supprimer le dossier supprime toute l'installation.
 #
 # Usage :
-#   .\install.ps1          # CPU (défaut)
+#   .\install.ps1          # CPU (defaut)
 #   .\install.ps1 --gpu    # GPU NVIDIA : torch CUDA + onnxruntime-gpu
 #
-# Pré-requis Windows :
+# Pre-requis Windows :
 #   - Python 3.10+ : https://python.org  (cocher "Add Python to PATH")
 #   - Pour insightface (compilation C++) :
-#       Visual Studio Build Tools avec "Développement Desktop en C++"
+#       Visual Studio Build Tools avec "Developpement Desktop en C++"
 #       https://visualstudio.microsoft.com/fr/visual-cpp-build-tools/
-#   - Pour GPU uniquement : CUDA Toolkit 12.x + cuDNN installés sur le système
+#   - Pour GPU uniquement : CUDA Toolkit 12.x + cuDNN installes sur le systeme
 #       https://developer.nvidia.com/cuda-downloads
 #       https://developer.nvidia.com/cudnn
 
 param([switch]$gpu)
 
 $ROOT = $PSScriptRoot
+
+# UTF-8 dans la console CMD (chcp 65001 cote bat + OutputEncoding cote PS)
+[Console]::OutputEncoding = [System.Text.Encoding]::UTF8
+$OutputEncoding            = [System.Text.Encoding]::UTF8
 
 function info  { Write-Host "[install] $args" -ForegroundColor Cyan }
 function warn  { Write-Host "[attention] $args" -ForegroundColor Yellow }
@@ -27,19 +31,19 @@ function make_venv {
     $name = $args[0]
     $dir  = "$ROOT\venvs\$name"
     if (-not (Test-Path "$dir\Scripts\python.exe")) {
-        info "création du venv '$name'"
+        info "creation du venv '$name'"
         python -m venv $dir
-        if ($LASTEXITCODE -ne 0) { err "Impossible de créer le venv '$name'." }
+        if ($LASTEXITCODE -ne 0) { err "Impossible de creer le venv '$name'." }
     }
-    & "$dir\Scripts\pip.exe" install --quiet --upgrade pip wheel setuptools
-    if ($LASTEXITCODE -ne 0) { err "Mise à jour de pip échouée (venv '$name')." }
+    & "$dir\Scripts\python.exe" -m pip install --quiet --upgrade pip wheel setuptools
+    if ($LASTEXITCODE -ne 0) { err "Mise a jour de pip echouee (venv '$name')." }
 }
 
 function pipin {
     $venv    = $args[0]
     $pipArgs = if ($args.Count -gt 1) { $args[1..($args.Count - 1)] } else { @() }
     & "$ROOT\venvs\$venv\Scripts\pip.exe" install @pipArgs
-    if ($LASTEXITCODE -ne 0) { err "pip install a échoué (venv '$venv')." }
+    if ($LASTEXITCODE -ne 0) { err "pip install a echoue (venv '$venv')." }
 }
 
 function pipout {
@@ -50,7 +54,7 @@ function pipout {
     }
 }
 
-# ---------------------------------------------------------------- pré-requis
+# ---------------------------------------------------------------- pre-requis
 $pyCmd = Get-Command python -ErrorAction SilentlyContinue
 if (-not $pyCmd) {
     err "python introuvable. Installez Python 3.10+ depuis https://python.org (cochez 'Add Python to PATH')."
@@ -63,15 +67,15 @@ if ($LASTEXITCODE -ne 0) {
 }
 
 python -c "import venv" 2>$null
-if ($LASTEXITCODE -ne 0) { err "module venv manquant. Réinstallez Python depuis https://python.org." }
+if ($LASTEXITCODE -ne 0) { err "module venv manquant. Reinstallez Python depuis https://python.org." }
 
 if ($gpu) {
     $smi = Get-Command nvidia-smi -ErrorAction SilentlyContinue
     if (-not $smi) {
-        err "--gpu demandé mais nvidia-smi introuvable. Installez le pilote NVIDIA et le CUDA Toolkit."
+        err "--gpu demande mais nvidia-smi introuvable. Installez le pilote NVIDIA et le CUDA Toolkit."
     }
     $gpuName = (nvidia-smi --query-gpu=name,driver_version --format=csv,noheader | Select-Object -First 1)
-    info "GPU détecté : $gpuName"
+    info "GPU detecte : $gpuName"
 }
 
 # Tous les caches restent dans le dossier du projet
@@ -80,7 +84,7 @@ $env:HF_HOME         = "$ROOT\.cache\huggingface"
 $env:TORCH_HOME      = "$ROOT\.cache\torch"
 $env:YOLO_CONFIG_DIR = "$ROOT\.cache\ultralytics"
 
-# Préférer les wheels binaires précompilés pour éviter la compilation
+# Preferer les wheels binaires precompiles pour eviter la compilation
 # depuis les sources (risque de blocage par Windows Defender dans %TEMP%).
 $env:PIP_PREFER_BINARY = "1"
 
@@ -98,7 +102,7 @@ info "venv core : orchestration + interface (opencv, gradio, ffmpeg statique, ..
 & "$ROOT\venvs\core\Scripts\pip.exe" cache remove numpy 2>$null
 & "$ROOT\venvs\core\Scripts\pip.exe" install --only-binary :all: "numpy>=1.24"
 if ($LASTEXITCODE -ne 0) {
-    err "Impossible d'installer le wheel numpy. Verifiez votre version de Python (3.10-3.13 requis)."
+    err "Impossible d'installer le wheel numpy. Verifiez votre version de Python (3.10-3.14 requis)."
 }
 
 pipin core -r "$ROOT\requirements\core.txt"
@@ -121,8 +125,8 @@ if ($wrongInstalled -or -not $rightInstalled) {
     pipin  face $ORT_WANTED
 }
 
-# Sur Windows, CUDA est fourni par le Toolkit système (pas par des paquets pip
-# nvidia-* comme sur Linux). onnxruntime-gpu le détecte automatiquement.
+# Sur Windows, CUDA est fourni par le Toolkit systeme (pas par des paquets pip
+# nvidia-* comme sur Linux). onnxruntime-gpu le detecte automatiquement.
 
 info "venv face : installation d'insightface (compilation C++ requise si pas de wheel binaire)"
 & "$ROOT\venvs\face\Scripts\pip.exe" install -r "$ROOT\requirements\face.txt"
@@ -131,7 +135,7 @@ if ($LASTEXITCODE -ne 0) {
 Echec de la compilation d'insightface.
 Installez les outils Build C++ puis relancez .\install.ps1 :
   https://visualstudio.microsoft.com/fr/visual-cpp-build-tools/
-  (sélectionnez "Développement Desktop en C++")
+  (selectionnez "Developpement Desktop en C++")
 "@)
 }
 
@@ -143,8 +147,8 @@ $torchVer = (& "$ROOT\venvs\body\Scripts\python.exe" -c "import torch; print(tor
 if (-not $torchVer) { $torchVer = "aucune" }
 
 if ($gpu) {
-    # Détection automatique de la version CUDA pour choisir l'index PyTorch correct
-    $cudaIndex = "cu124"  # valeur par défaut ; modifiez si nécessaire (cu118, cu121, cu124)
+    # Detection automatique de la version CUDA pour choisir l'index PyTorch correct
+    $cudaIndex = "cu124"  # valeur par defaut ; modifiez si necessaire (cu118, cu121, cu124)
     $smiOut = (nvidia-smi 2>$null) -join "`n"
     if ($smiOut -match "CUDA Version:\s*(\d+)\.(\d+)") {
         $cudaMaj = [int]$Matches[1]
@@ -152,19 +156,19 @@ if ($gpu) {
         if     ($cudaMaj -lt 12)                     { $cudaIndex = "cu118" }
         elseif ($cudaMaj -eq 12 -and $cudaMin -lt 4) { $cudaIndex = "cu121" }
         else                                          { $cudaIndex = "cu124" }
-        info "CUDA $cudaMaj.$cudaMin détecté → index PyTorch : $cudaIndex"
+        info "CUDA $cudaMaj.$cudaMin detecte -> index PyTorch : $cudaIndex"
     } else {
-        warn "Version CUDA non détectée dans la sortie nvidia-smi ; utilisation de $cudaIndex par défaut."
+        warn "Version CUDA non detectee dans nvidia-smi ; utilisation de $cudaIndex par defaut."
     }
 
     if ($torchVer -like "*+cpu*") {
-        info "torch $torchVer (CPU) présent → remplacement par la variante CUDA"
+        info "torch $torchVer (CPU) present -> remplacement par la variante CUDA"
         pipout body torch torchvision
     }
     pipin body torch torchvision --index-url "https://download.pytorch.org/whl/$cudaIndex"
 } else {
     if ($torchVer -ne "aucune" -and $torchVer -notlike "*+cpu*") {
-        info "torch $torchVer (CUDA) présent → remplacement par la variante CPU"
+        info "torch $torchVer (CUDA) present -> remplacement par la variante CPU"
         pipout body torch torchvision
     }
     pipin body torch torchvision --index-url "https://download.pytorch.org/whl/cpu"
@@ -172,7 +176,7 @@ if ($gpu) {
 pipin body -r "$ROOT\requirements\body.txt"
 
 if ($gpu) {
-    info "vérification CUDA (torch)..."
+    info "verification CUDA (torch)..."
     $cudaCheck = @'
 import torch, sys
 if not torch.cuda.is_available():
@@ -182,12 +186,12 @@ print("  torch CUDA OK :", torch.cuda.get_device_name(0))
 '@
     & "$ROOT\venvs\body\Scripts\python.exe" -c $cudaCheck
     if ($LASTEXITCODE -ne 0) {
-        warn "torch ne voit pas le GPU : le détecteur 'body' tournera sur CPU."
+        warn "torch ne voit pas le GPU : le detecteur 'body' tournera sur CPU."
     }
 }
 
-# ---------------------------------------------------------------- modèles IA
-info "modèles : InsightFace buffalo_l → models\insightface\"
+# ---------------------------------------------------------------- modeles IA
+info "modeles : InsightFace buffalo_l -> models\insightface\"
 $insightScript = @'
 import sys
 from insightface.app import FaceAnalysis
@@ -199,10 +203,10 @@ app.prepare(ctx_id=-1, det_size=(640, 640))
 print("  buffalo_l OK")
 '@
 & "$ROOT\venvs\face\Scripts\python.exe" -c $insightScript $ROOT
-if ($LASTEXITCODE -ne 0) { err "Echec du téléchargement du modèle InsightFace buffalo_l." }
+if ($LASTEXITCODE -ne 0) { err "Echec du telechargement du modele InsightFace buffalo_l." }
 
 if ($gpu) {
-    info "vérification CUDA (onnxruntime) : session d'inférence réelle..."
+    info "verification CUDA (onnxruntime) : session d'inference reelle..."
     $ortCudaScript = @'
 import glob, sys
 import onnxruntime as ort
@@ -213,13 +217,13 @@ print("  onnxruntime-gpu OK :", sess.get_providers())
 '@
     & "$ROOT\venvs\face\Scripts\python.exe" -c $ortCudaScript $ROOT
     if ($LASTEXITCODE -ne 0) {
-        warn "onnxruntime-gpu inutilisable sur cette machine → repli sur la version CPU."
+        warn "onnxruntime-gpu inutilisable sur cette machine -> repli sur la version CPU."
         pipout face onnxruntime onnxruntime-gpu
         pipin  face onnxruntime
     }
 }
 
-info "modèles : YOLOv8s → models\yolo\"
+info "modeles : YOLOv8s -> models\yolo\"
 if (-not (Test-Path "$ROOT\models\yolo")) {
     New-Item -ItemType Directory -Force "$ROOT\models\yolo" | Out-Null
 }
@@ -227,9 +231,9 @@ Push-Location "$ROOT\models\yolo"
 & "$ROOT\venvs\body\Scripts\python.exe" -c "from ultralytics import YOLO; YOLO('yolov8s.pt'); print('  yolov8s OK')"
 $yoloCode = $LASTEXITCODE
 Pop-Location
-if ($yoloCode -ne 0) { err "Echec du téléchargement de YOLOv8s." }
+if ($yoloCode -ne 0) { err "Echec du telechargement de YOLOv8s." }
 
-info "modèles : CLIP ViT-B/32 (laion2b) → models\openclip\"
+info "modeles : CLIP ViT-B/32 (laion2b) -> models\openclip\"
 $clipScript = @'
 import sys
 import open_clip
@@ -239,8 +243,8 @@ open_clip.create_model_and_transforms(
 print("  CLIP OK")
 '@
 & "$ROOT\venvs\body\Scripts\python.exe" -c $clipScript $ROOT
-if ($LASTEXITCODE -ne 0) { err "Echec du téléchargement du modèle CLIP." }
+if ($LASTEXITCODE -ne 0) { err "Echec du telechargement du modele CLIP." }
 
-info "installation terminée."
+info "installation terminee."
 info "  interface         : .\run.ps1   (ou double-cliquez run.bat)"
 info "  ligne de commande : .\cli.ps1 -i video.mp4 -g femme   (ou cli.bat)"
