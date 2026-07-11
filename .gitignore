@@ -1,0 +1,17 @@
+# Tout ce qui est généré/installé localement (auto-contenu dans le dossier)
+venvs/
+models/
+.cache/
+work/
+output/
+
+# Python
+__pycache__/
+*.pyc
+
+# Vidéos de test
+*.mp4
+*.mkv
+*.avi
+*.mov
+*.webm
