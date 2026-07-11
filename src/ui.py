@@ -329,7 +329,7 @@ def build_app():
                 table = gr.Dataframe(
                     headers=TABLE_HEADERS,
                     datatype=["number", "number", "str", "str", "bool"],
-                    col_count=(5, "fixed"),
+                    column_count=(5, "fixed"),
                     type="array",
                     interactive=True,
                     label="Plages à noircir — éditez au choix les secondes ou "
