@@ -112,18 +112,18 @@ pipin core -r "$ROOT\requirements\core.txt"
 make_venv face
 info "venv face : insightface + onnxruntime"
 
+# Protection numpy binaire (meme raison que pour venv core)
+& "$ROOT\venvs\face\Scripts\pip.exe" cache remove numpy 2>$null
+& "$ROOT\venvs\face\Scripts\pip.exe" install --only-binary :all: "numpy>=1.24"
+if ($LASTEXITCODE -ne 0) { err "Impossible d'installer le wheel numpy (venv 'face')." }
+
+# Installer la bonne variante onnxruntime (appel direct, pas via pipin,
+# pour eviter un bug de splatting PS5.1 avec variable scalaire)
 $ORT_WANTED = if ($gpu) { "onnxruntime-gpu" } else { "onnxruntime" }
-$wrongOrt   = if ($gpu) { "onnxruntime" } else { "onnxruntime-gpu" }
-
-& "$ROOT\venvs\face\Scripts\pip.exe" show $wrongOrt  2>$null | Out-Null
-$wrongInstalled = ($LASTEXITCODE -eq 0)
-& "$ROOT\venvs\face\Scripts\pip.exe" show $ORT_WANTED 2>$null | Out-Null
-$rightInstalled = ($LASTEXITCODE -eq 0)
-
-if ($wrongInstalled -or -not $rightInstalled) {
-    pipout face onnxruntime onnxruntime-gpu
-    pipin  face $ORT_WANTED
-}
+$ORT_WRONG  = if ($gpu) { "onnxruntime"     } else { "onnxruntime-gpu" }
+& "$ROOT\venvs\face\Scripts\pip.exe" uninstall -y -q $ORT_WRONG 2>$null
+& "$ROOT\venvs\face\Scripts\pip.exe" install $ORT_WANTED
+if ($LASTEXITCODE -ne 0) { err "Impossible d'installer $ORT_WANTED (venv 'face')." }
 
 # Sur Windows, CUDA est fourni par le Toolkit systeme (pas par des paquets pip
 # nvidia-* comme sur Linux). onnxruntime-gpu le detecte automatiquement.
