@@ -44,16 +44,29 @@ GENDER_ALIASES = {
 }
 
 
+def _venv_python(venv_name):
+    """Chemin de l'interpréteur Python du venv selon la plateforme."""
+    if sys.platform == "win32":
+        return ROOT / "venvs" / venv_name / "Scripts" / "python.exe"
+    return ROOT / "venvs" / venv_name / "bin" / "python"
+
+
 def detector_env(venv_name, plain_progress=False):
-    """Environnement du sous-processus : libs CUDA pip du venv (si installées)
-    exposées via LD_LIBRARY_PATH, car rien n'est installé au niveau système."""
+    """Environnement du sous-processus.
+
+    Sur Linux/macOS : les libs CUDA installées via pip (paquets nvidia-*)
+    sont exposées via LD_LIBRARY_PATH car elles ne sont pas dans le PATH
+    système.  Sur Windows : CUDA est fourni par le Toolkit système, aucun
+    ajustement de PATH n'est nécessaire.
+    """
     env = os.environ.copy()
-    venv_dir = ROOT / "venvs" / venv_name
-    nvlibs = sorted(str(p) for p in venv_dir.glob(
-        "lib/python*/site-packages/nvidia/*/lib"))
-    if nvlibs:
-        prev = env.get("LD_LIBRARY_PATH", "")
-        env["LD_LIBRARY_PATH"] = ":".join(nvlibs + ([prev] if prev else []))
+    if sys.platform != "win32":
+        venv_dir = ROOT / "venvs" / venv_name
+        nvlibs = sorted(str(p) for p in venv_dir.glob(
+            "lib/python*/site-packages/nvidia/*/lib"))
+        if nvlibs:
+            prev = env.get("LD_LIBRARY_PATH", "")
+            env["LD_LIBRARY_PATH"] = ":".join(nvlibs + ([prev] if prev else []))
     if plain_progress:
         env["IASG_PROGRESS"] = "plain"
     return env
@@ -72,9 +85,10 @@ def run_detector(name, video, work_dir, stride, log=print, capture=False):
         with open(out_path) as f:
             return json.load(f)
 
-    py = ROOT / "venvs" / spec["venv"] / "bin" / "python"
+    py = _venv_python(spec["venv"])
     if not py.exists():
-        raise RuntimeError(f"venv '{spec['venv']}' manquant : lancez ./install.sh")
+        script = r".\install.ps1" if sys.platform == "win32" else "./install.sh"
+        raise RuntimeError(f"venv '{spec['venv']}' manquant : lancez {script}")
 
     cmd = [str(py), str(ROOT / spec["script"]),
            "--video", str(video),
