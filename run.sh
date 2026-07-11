@@ -13,6 +13,7 @@ export HF_HOME="$ROOT/.cache/huggingface"
 export TORCH_HOME="$ROOT/.cache/torch"
 export XDG_CACHE_HOME="$ROOT/.cache/xdg"
 export YOLO_CONFIG_DIR="$ROOT/.cache/ultralytics"
+mkdir -p "$YOLO_CONFIG_DIR"
 export HF_HUB_OFFLINE=1
 export TRANSFORMERS_OFFLINE=1
 export YOLO_OFFLINE=1

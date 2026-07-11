@@ -28,7 +28,7 @@ export HF_HOME="$ROOT/.cache/huggingface"
 export TORCH_HOME="$ROOT/.cache/torch"
 export XDG_CACHE_HOME="$ROOT/.cache/xdg"
 export YOLO_CONFIG_DIR="$ROOT/.cache/ultralytics"
-mkdir -p "$ROOT/venvs" "$ROOT/models" "$ROOT/.cache"
+mkdir -p "$ROOT/venvs" "$ROOT/models" "$ROOT/.cache" "$YOLO_CONFIG_DIR"
 
 make_venv() { # $1 = nom
     local dir="$ROOT/venvs/$1"
