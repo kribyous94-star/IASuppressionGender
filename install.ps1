@@ -96,7 +96,7 @@ info "venv core : orchestration + interface (opencv, gradio, ffmpeg statique, ..
 # Sans ca, Meson compile depuis les sources -> Defender bloque le binaire de test
 # dans %TEMP% (faux positif Win64:MalwareX-gen sur sanitycheckcpp.exe).
 & "$ROOT\venvs\core\Scripts\pip.exe" cache remove numpy 2>$null
-& "$ROOT\venvs\core\Scripts\pip.exe" install --only-binary :all: "numpy<2.3"
+& "$ROOT\venvs\core\Scripts\pip.exe" install --only-binary :all: "numpy>=1.24"
 if ($LASTEXITCODE -ne 0) {
     err "Impossible d'installer le wheel numpy. Verifiez votre version de Python (3.10-3.13 requis)."
 }
