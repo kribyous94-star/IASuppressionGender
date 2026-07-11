@@ -44,15 +44,27 @@ réellement utilisable et se replie automatiquement sur le CPU sinon. Relancer
 ```
 
 Ouvre une interface web **locale** (127.0.0.1, aucun accès externe) dans le
-navigateur : glissez une vidéo, choisissez le genre à supprimer, ajustez les
-réglages avancés si besoin, suivez le journal en direct et prévisualisez le
-résultat (écrit dans `output/`). Options : `--port N`, `--no-browser`.
+navigateur, en deux étapes :
+
+1. **Analyser** : glissez une vidéo, choisissez le genre à supprimer (réglages
+   avancés dans l'accordéon), suivez le journal en direct. L'analyse produit
+   un **tableau de plages** (début/fin en secondes).
+2. **Éditer puis générer** : dans le tableau, décochez une plage pour la
+   désactiver, modifiez son début/sa fin, ou ajoutez-en une (➕). Choisissez
+   les sorties — **vidéo censurée**, **fichier de plages (JSON)**, ou les
+   deux — puis générez (aucune nouvelle analyse, c'est immédiat). Les sorties
+   vont dans `output/`.
+
+Options : `--port N`, `--no-browser`.
 
 ### Ligne de commande
 
 ```bash
-./cli.sh -i video.mp4 -g femme                 # noircit les frames contenant une femme
-./cli.sh -i video.mp4 -g homme -o resultat.mp4 # idem pour un homme, sortie nommée
+./cli.sh -i video.mp4 -g femme                 # vidéo censurée + fichier de plages
+./cli.sh -i video.mp4 -g homme -o resultat.mp4 # sortie nommée
+./cli.sh -i video.mp4 -g femme --out plages    # fichier de plages seulement
+./cli.sh -i video.mp4 --ranges resultat.plages.json  # re-rendu depuis un fichier
+                                               # de plages édité (pas d'analyse)
 ```
 
 Options principales (voir `./cli.sh --help` pour tout) :
@@ -62,6 +74,9 @@ Options principales (voir `./cli.sh --help` pour tout) :
 | `-i, --input` | — | Vidéo d'entrée |
 | `-g, --gender` | — | Genre ciblé : `homme`/`femme` (ou `male`/`female`) |
 | `-o, --output` | `<input>_censored.mp4` | Vidéo de sortie |
+| `--out` | `both` | Sorties : `video`, `plages` (JSON éditable) ou `both` |
+| `--ranges` | — | Rend la vidéo depuis un fichier de plages (édité), sans analyse |
+| `--ranges-out` | `<sortie>.plages.json` | Chemin du fichier de plages |
 | `--detectors` | `face,body` | Détecteurs à utiliser, séparés par des virgules |
 | `--stride` | `3` | Analyse 1 frame sur N (1 = toutes, plus lent) |
 | `--pad` | `0.25` | Marge de sécurité (secondes) noircie autour de chaque détection |
@@ -79,9 +94,12 @@ Options principales (voir `./cli.sh --help` pour tout) :
    - `body` : YOLOv8 (détection de personnes) + CLIP zero-shot sur le corps entier —
      fonctionne de dos, visage masqué, silhouette partielle.
 2. **Fusion** : les résultats sont combinés (un seul détecteur positif suffit),
-   étendus temporellement (`--pad`, `--gap`) pour éviter les frames ratées.
-3. **Rendu** : la vidéo est réécrite avec des frames noires sur les zones flaguées,
-   puis l'audio original est remixé via le ffmpeg statique embarqué.
+   étendus temporellement (`--pad`, `--gap`) et convertis en **plages** en
+   secondes — exportables dans un fichier JSON éditable à la main ou dans
+   l'interface (désactiver/ajuster/ajouter des plages).
+3. **Rendu** : la vidéo est réécrite avec des frames noires sur les plages
+   actives, puis l'audio original est remixé via le ffmpeg statique embarqué.
+   Le rendu peut être relancé depuis des plages éditées sans refaire l'analyse.
 
 Détails complets : [ARCHITECTURE.md](ARCHITECTURE.md).
 

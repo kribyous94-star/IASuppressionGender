@@ -12,8 +12,11 @@ import numpy as np
 from tqdm import tqdm
 
 
-def render(video_path, output_path, flagged_frames):
-    """Copie la vidéo en noircissant les frames de `flagged_frames` (set d'index)."""
+def render(video_path, output_path, flagged_frames, progress=None):
+    """Copie la vidéo en noircissant les frames de `flagged_frames` (set d'index).
+
+    progress : callback optionnel (frames_traitées, total) appelé périodiquement.
+    """
     cap = cv2.VideoCapture(str(video_path))
     if not cap.isOpened():
         raise RuntimeError(f"impossible d'ouvrir {video_path}")
@@ -32,6 +35,7 @@ def render(video_path, output_path, flagged_frames):
     black = np.zeros((h, w, 3), dtype=np.uint8)
 
     idx = 0
+    step = max(1, total // 10)
     with tqdm(total=total, desc="[rendu]", unit="f") as bar:
         while True:
             ok, frame = cap.read()
@@ -40,6 +44,8 @@ def render(video_path, output_path, flagged_frames):
             writer.write(black if idx in flagged_frames else frame)
             idx += 1
             bar.update(1)
+            if progress and idx % step == 0:
+                progress(idx, total)
     cap.release()
     writer.release()
 

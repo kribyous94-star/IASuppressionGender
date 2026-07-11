@@ -4,6 +4,7 @@ l'interface (ui.py).
 Lance chaque détecteur dans son propre venv (sous-processus), fusionne les
 détections, puis rend la vidéo avec les frames flaguées remplacées par du noir.
 """
+import datetime
 import json
 import os
 import shutil
@@ -12,10 +13,13 @@ import sys
 import time
 from pathlib import Path
 
+import cv2
+
 ROOT = Path(__file__).resolve().parent.parent
 
 sys.path.insert(0, str(ROOT / "src"))
-from fusion import fuse  # noqa: E402
+from fusion import (fuse, seconds_to_frames, spans_to_frames,  # noqa: E402
+                    spans_to_seconds)
 from render import render  # noqa: E402
 
 # Registre des détecteurs : en ajouter un = ajouter une entrée ici
@@ -95,12 +99,75 @@ def run_detector(name, video, work_dir, stride, log=print, capture=False):
         return json.load(f)
 
 
+def video_meta(video):
+    """(fps, nombre de frames) d'une vidéo."""
+    cap = cv2.VideoCapture(str(video))
+    if not cap.isOpened():
+        raise RuntimeError(f"impossible d'ouvrir {video}")
+    fps = cap.get(cv2.CAP_PROP_FPS) or 25.0
+    total = int(cap.get(cv2.CAP_PROP_FRAME_COUNT))
+    cap.release()
+    return fps, total
+
+
+def write_ranges_file(path, video, gender, fps, total_frames, ranges,
+                      settings=None):
+    """Écrit le fichier de plages (JSON éditable, cf. ARCHITECTURE.md §4.6)."""
+    path = Path(path)
+    path.parent.mkdir(parents=True, exist_ok=True)
+    data = {
+        "video": str(video),
+        "gender": gender,
+        "fps": fps,
+        "total_frames": total_frames,
+        "created": datetime.datetime.now().isoformat(timespec="seconds"),
+        "settings": settings or {},
+        "ranges": ranges,
+    }
+    with open(path, "w") as f:
+        json.dump(data, f, indent=2, ensure_ascii=False)
+    return str(path)
+
+
+def render_from_ranges(video, ranges, output=None, log=print):
+    """Rend la vidéo censurée à partir de plages en secondes — soit la liste
+    [{start, end, enabled}], soit le chemin d'un fichier de plages (JSON),
+    éventuellement édité à la main. Aucune détection n'est relancée.
+    """
+    video = Path(video).resolve()
+    if not video.is_file():
+        raise FileNotFoundError(f"vidéo introuvable : {video}")
+    if isinstance(ranges, (str, Path)):
+        with open(ranges) as f:
+            ranges = json.load(f)["ranges"]
+    output = Path(output).resolve() if output else \
+        video.parent / f"{video.stem}_censored.mp4"
+    output.parent.mkdir(parents=True, exist_ok=True)
+
+    fps, total = video_meta(video)
+    active = [r for r in ranges if r.get("enabled", True)]
+    flagged = seconds_to_frames(ranges, fps, total)
+    pct = 100 * len(flagged) / max(total, 1)
+    log(f"[rendu] {len(active)} plage(s) active(s) → {len(flagged)}/{total} "
+        f"frames noircies ({pct:.1f}%)")
+    render(video, output, flagged,
+           progress=lambda i, t: log(f"[rendu] {i}/{t} frames"))
+    log(f"[ok] vidéo écrite : {output}")
+    return {"output": str(output), "flagged": len(flagged),
+            "total": total, "pct": pct}
+
+
 def run_job(video, gender, output=None, detectors=("face", "body"), stride=3,
             pad=0.25, gap=0.5, thresholds=None, strict=False, keep_work=False,
-            log=print, capture=False):
-    """Traite une vidéo de bout en bout. Renvoie un dict de statistiques.
+            log=print, capture=False, outputs=("video", "ranges"),
+            ranges_out=None):
+    """Traite une vidéo de bout en bout. Renvoie un dict de statistiques
+    (dont la liste des plages en secondes).
 
-    gender : 'homme'/'femme'/'male'/'female' — thresholds : {détecteur: seuil}.
+    gender  : 'homme'/'femme'/'male'/'female' — thresholds : {détecteur: seuil}.
+    outputs : sorties à produire, parmi 'video' et 'ranges' (fichier de
+              plages JSON). L'analyse a lieu dans tous les cas et les plages
+              sont toujours renvoyées dans les stats.
     """
     target = GENDER_ALIASES[str(gender).lower()]
     video = Path(video).resolve()
@@ -108,7 +175,8 @@ def run_job(video, gender, output=None, detectors=("face", "body"), stride=3,
         raise FileNotFoundError(f"vidéo introuvable : {video}")
     output = Path(output).resolve() if output else \
         video.parent / f"{video.stem}_censored.mp4"
-    output.parent.mkdir(parents=True, exist_ok=True)
+    ranges_path = Path(ranges_out).resolve() if ranges_out else \
+        output.parent / f"{output.stem}.plages.json"
 
     unknown = [n for n in detectors if n not in DETECTORS]
     if unknown:
@@ -119,6 +187,9 @@ def run_job(video, gender, output=None, detectors=("face", "body"), stride=3,
 
     thr = {n: DETECTORS[n]["default_thr"] for n in DETECTORS}
     thr.update(thresholds or {})
+    settings = {"detectors": list(detectors), "stride": stride, "pad": pad,
+                "gap": gap, "thresholds": {n: thr[n] for n in detectors},
+                "strict": strict}
 
     work_dir = ROOT / "work" / video.stem
     work_dir.mkdir(parents=True, exist_ok=True)
@@ -129,23 +200,35 @@ def run_job(video, gender, output=None, detectors=("face", "body"), stride=3,
                                       log=log, capture=capture)
                    for name in detectors}
 
-        # 2. Fusion des détections → ensemble de frames à noircir
+        # 2. Fusion des détections → plages de frames à noircir
         meta = next(iter(results.values()))
         fps, total = meta["fps"], meta["total_frames"]
-        flagged = fuse(results, target=target, thresholds=thr,
-                       fps=fps, total_frames=total,
-                       pad_s=pad, gap_s=gap, strict=strict)
+        spans = fuse(results, target=target, thresholds=thr,
+                     fps=fps, total_frames=total,
+                     pad_s=pad, gap_s=gap, strict=strict)
+        ranges = spans_to_seconds(spans, fps)
+        flagged = spans_to_frames(spans)
         pct = 100 * len(flagged) / max(total, 1)
-        log(f"[fusion] {len(flagged)}/{total} frames noircies ({pct:.1f}%) "
-            f"— cible : {target}, strict : {strict}")
+        log(f"[fusion] {len(ranges)} plage(s), {len(flagged)}/{total} frames "
+            f"noircies ({pct:.1f}%) — cible : {target}, strict : {strict}")
 
-        # 3. Rendu : frames noires + remux audio
-        log("[rendu] écriture de la vidéo…")
-        render(video, output, flagged)
-        log(f"[ok] vidéo écrite : {output}")
+        stats = {"output": None, "ranges_file": None, "ranges": ranges,
+                 "flagged": len(flagged), "total": total, "pct": pct,
+                 "fps": fps}
+
+        # 3. Sorties demandées : fichier de plages et/ou vidéo
+        if "ranges" in outputs:
+            stats["ranges_file"] = write_ranges_file(
+                ranges_path, video, target, fps, total, ranges, settings)
+            log(f"[ok] plages écrites : {ranges_path}")
+        if "video" in outputs:
+            output.parent.mkdir(parents=True, exist_ok=True)
+            log("[rendu] écriture de la vidéo…")
+            render(video, output, flagged)
+            stats["output"] = str(output)
+            log(f"[ok] vidéo écrite : {output}")
     finally:
         if not keep_work:
             shutil.rmtree(work_dir, ignore_errors=True)
 
-    return {"output": str(output), "flagged": len(flagged),
-            "total": total, "pct": pct}
+    return stats

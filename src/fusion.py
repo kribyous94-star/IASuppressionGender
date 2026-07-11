@@ -1,8 +1,10 @@
 """Fusion des détections : OR entre détecteurs, seuils, expansion temporelle.
 
-Biais assumé vers le faux positif : mieux vaut une frame noire en trop qu'un
-individu du genre ciblé visible une frame.
+Produit des *plages* (intervalles de frames), converties en secondes pour le
+fichier de plages éditable. Biais assumé vers le faux positif : mieux vaut une
+frame noire en trop qu'un individu du genre ciblé visible une frame.
 """
+import math
 
 OTHER = {"male": "female", "female": "male"}
 
@@ -24,7 +26,8 @@ def _hit(det, target, thr, strict):
 
 def fuse(results, target, thresholds, fps, total_frames,
          pad_s=0.25, gap_s=0.5, strict=False):
-    """Combine les JSON des détecteurs → set d'indices de frames à noircir.
+    """Combine les JSON des détecteurs → liste de plages de frames à noircir,
+    triées, sous forme de tuples (première_frame, dernière_frame) inclusifs.
 
     results     : {nom: json_du_détecteur} (cf. ARCHITECTURE.md §4.1)
     thresholds  : {nom: seuil de confiance}
@@ -40,18 +43,51 @@ def fuse(results, target, thresholds, fps, total_frames,
                 flagged.update(range(i, min(i + stride, total_frames)))
 
     if not flagged:
-        return flagged
+        return []
 
     # spans contigus → pad → fusion des gaps courts
     spans = _to_spans(sorted(flagged))
     pad = round(pad_s * fps)
     spans = [(max(0, a - pad), min(total_frames - 1, b + pad)) for a, b in spans]
-    spans = _merge_gaps(spans, round(gap_s * fps))
+    return _merge_gaps(spans, round(gap_s * fps))
 
+
+def spans_to_frames(spans):
+    """Plages de frames inclusives → set d'indices de frames."""
     out = set()
     for a, b in spans:
         out.update(range(a, b + 1))
     return out
+
+
+def spans_to_seconds(spans, fps):
+    """Plages de frames inclusives → plages éditables en secondes.
+
+    La plage (a, b) couvre l'intervalle temporel [a/fps, (b+1)/fps).
+    """
+    return [{"start": round(a / fps, 3), "end": round((b + 1) / fps, 3),
+             "enabled": True} for a, b in spans]
+
+
+def seconds_to_frames(ranges, fps, total_frames):
+    """Plages en secondes (éventuellement éditées à la main) → set de frames.
+
+    Les plages désactivées (enabled: false) ou invalides sont ignorées.
+    """
+    frames = set()
+    for r in ranges:
+        if not r.get("enabled", True):
+            continue
+        try:
+            start, end = float(r["start"]), float(r["end"])
+        except (KeyError, TypeError, ValueError):
+            continue
+        if end <= start:
+            continue
+        a = max(0, int(start * fps))
+        b = min(total_frames - 1, math.ceil(end * fps) - 1)
+        frames.update(range(a, b + 1))
+    return frames
 
 
 def _to_spans(sorted_indices):

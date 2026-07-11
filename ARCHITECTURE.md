@@ -59,12 +59,15 @@ venvs/
                           fusion.py : OR + seuils
                           + expansion stride + pad + gap
                                     ▼
-                       ensemble de frames à noircir
-                                    ▼
-                render.py : réécriture vidéo (frames noires)
-                + remux audio (ffmpeg statique embarqué)
-                                    ▼
-                              output.mp4
+                        plages à noircir (secondes)
+                          │                   │
+                          │        édition (interface ou à la main)
+                          │                   │
+                          ▼                   ▼
+                render.py : frames noires   <sortie>.plages.json
+                + remux audio (ffmpeg)      (fichier éditable,
+                          ▼                  re-rendu via --ranges)
+                     output.mp4
 ```
 
 ### 4.1 Contrat JSON des détecteurs
@@ -128,7 +131,31 @@ Sortie (seules les frames avec détections apparaissent) :
 5. **Gap** : deux zones distantes de moins de `gap` secondes sont fusionnées
    (évite les « clignotements » de quelques frames visibles).
 
-### 4.5 Rendu (`src/render.py`, venv core)
+### 4.5 Fichier de plages (sortie éditable)
+
+La fusion produit des plages en secondes, exportables en JSON
+(`<sortie>.plages.json`) :
+
+```json
+{
+  "video": "…", "gender": "female", "fps": 25.0, "total_frames": 4521,
+  "created": "2026-07-11T12:00:00",
+  "settings": {"detectors": ["face", "body"], "stride": 3, "…": "…"},
+  "ranges": [
+    {"start": 1.2, "end": 3.48, "enabled": true},
+    {"start": 10.0, "end": 12.5, "enabled": false}
+  ]
+}
+```
+
+Ce fichier est le **format d'échange éditable** : on peut désactiver une plage
+(`enabled: false`), ajuster `start`/`end`, ou ajouter une entrée — à la main,
+ou via le tableau de l'interface. `pipeline.render_from_ranges()` (CLI :
+`--ranges fichier.json`) rend ensuite la vidéo sans relancer la détection.
+Les sorties sont sélectionnables : vidéo, fichier de plages, ou les deux
+(CLI : `--out video|plages|both` ; interface : cases à cocher).
+
+### 4.6 Rendu (`src/render.py`, venv core)
 
 - Relecture de la vidéo avec OpenCV, écriture d'une frame noire (même résolution)
   pour chaque index flagué, copie telle quelle sinon.
