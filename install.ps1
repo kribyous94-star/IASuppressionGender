@@ -166,15 +166,21 @@ $torchVer = (& "$ROOT\venvs\body\Scripts\python.exe" -c "import torch; print(tor
 if (-not $torchVer) { $torchVer = "aucune" }
 
 if ($gpu) {
-    # Detection automatique de la version CUDA pour choisir l'index PyTorch correct
-    $cudaIndex = "cu124"  # valeur par defaut ; modifiez si necessaire (cu118, cu121, cu124)
+    # Detection automatique de la version CUDA pour choisir l'index PyTorch correct.
+    # La version affichee par nvidia-smi est celle du pilote (max supportee) ;
+    # on choisit le wheel le plus recent disponible inferieur ou egal.
+    # Mapping : < 12 -> cu118 | 12.0-12.3 -> cu121 | 12.4-12.5 -> cu124
+    #           12.6-12.7 -> cu126 | 12.8+ / 13.x -> cu128
+    $cudaIndex = "cu128"  # valeur par defaut (CUDA 12.8+ / 13.x)
     $smiOut = (nvidia-smi 2>$null) -join "`n"
     if ($smiOut -match "CUDA Version:\s*(\d+)\.(\d+)") {
         $cudaMaj = [int]$Matches[1]
         $cudaMin = [int]$Matches[2]
         if     ($cudaMaj -lt 12)                     { $cudaIndex = "cu118" }
         elseif ($cudaMaj -eq 12 -and $cudaMin -lt 4) { $cudaIndex = "cu121" }
-        else                                          { $cudaIndex = "cu124" }
+        elseif ($cudaMaj -eq 12 -and $cudaMin -lt 6) { $cudaIndex = "cu124" }
+        elseif ($cudaMaj -eq 12 -and $cudaMin -lt 8) { $cudaIndex = "cu126" }
+        else                                          { $cudaIndex = "cu128" }
         info "CUDA $cudaMaj.$cudaMin detecte -> index PyTorch : $cudaIndex"
     } else {
         warn "Version CUDA non detectee dans nvidia-smi ; utilisation de $cudaIndex par defaut."
@@ -184,7 +190,14 @@ if ($gpu) {
         info "torch $torchVer (CPU) present -> remplacement par la variante CUDA"
         pipout body torch torchvision
     }
-    pipin body torch torchvision --index-url "https://download.pytorch.org/whl/$cudaIndex"
+    & "$ROOT\venvs\body\Scripts\pip.exe" install torch torchvision --index-url "https://download.pytorch.org/whl/$cudaIndex"
+    if ($LASTEXITCODE -ne 0) {
+        warn "Aucun wheel torch CUDA ($cudaIndex) pour cette version de Python."
+        warn "Le detecteur 'body' tournera sur CPU ; onnxruntime-gpu utilisera quand meme le GPU pour 'face'."
+        pipout body torch torchvision
+        & "$ROOT\venvs\body\Scripts\pip.exe" install torch torchvision --index-url "https://download.pytorch.org/whl/cpu"
+        if ($LASTEXITCODE -ne 0) { err "Impossible d'installer torch (CPU ni CUDA)." }
+    }
 } else {
     if ($torchVer -ne "aucune" -and $torchVer -notlike "*+cpu*") {
         info "torch $torchVer (CUDA) present -> remplacement par la variante CPU"
