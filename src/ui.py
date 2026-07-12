@@ -17,6 +17,21 @@ import sys
 import threading
 from pathlib import Path
 
+# ProactorEventLoop (Windows default) leve ConnectionResetError (WinError 10054)
+# quand le navigateur ferme la connexion. Le callback interne n'est pas protege
+# contre ce cas ; on le patche directement (compatible Python 3.14+ et 3.16+).
+if sys.platform == "win32":
+    from asyncio import proactor_events as _pe
+    _orig_ccl = _pe._ProactorBasePipeTransport._call_connection_lost
+
+    def _patched_ccl(self, exc):
+        try:
+            _orig_ccl(self, exc)
+        except ConnectionResetError:
+            pass
+
+    _pe._ProactorBasePipeTransport._call_connection_lost = _patched_ccl
+
 import gradio as gr
 import psutil
 
