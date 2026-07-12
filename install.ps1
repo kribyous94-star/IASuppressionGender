@@ -249,9 +249,12 @@ print('  onnxruntime-gpu OK :', sess.get_providers())
 '@
     & "$ROOT\venvs\face\Scripts\python.exe" -c $ortCudaScript $ROOT
     if ($LASTEXITCODE -ne 0) {
-        warn "onnxruntime-gpu inutilisable sur cette machine -> repli sur la version CPU."
-        pipout face onnxruntime onnxruntime-gpu
-        pipin  face onnxruntime
+        warn "onnxruntime-gpu inutilisable -> repli sur onnxruntime CPU."
+        warn "Pour activer le GPU sur InsightFace : CUDA Toolkit 13 + cuDNN 9 doivent etre installes."
+        warn "Voir : https://onnxruntime.ai/docs/execution-providers/CUDA-ExecutionProvider.html"
+        & "$ROOT\venvs\face\Scripts\pip.exe" uninstall -y -q onnxruntime-gpu onnxruntime 2>$null
+        & "$ROOT\venvs\face\Scripts\pip.exe" install onnxruntime
+        if ($LASTEXITCODE -ne 0) { err "Impossible d'installer onnxruntime (repli CPU)." }
     }
 }
 
