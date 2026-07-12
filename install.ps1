@@ -35,7 +35,7 @@ function make_venv {
         python -m venv $dir
         if ($LASTEXITCODE -ne 0) { err "Impossible de creer le venv '$name'." }
     }
-    & "$dir\Scripts\python.exe" -m pip install --quiet --upgrade pip wheel setuptools
+    & "$dir\Scripts\python.exe" -m pip install --quiet --upgrade pip wheel "setuptools<82"
     if ($LASTEXITCODE -ne 0) { err "Mise a jour de pip echouee (venv '$name')." }
 }
 
@@ -247,7 +247,7 @@ sess = ort.InferenceSession(model, providers=['CUDAExecutionProvider'])
 assert 'CUDAExecutionProvider' in sess.get_providers(), sess.get_providers()
 print('  onnxruntime-gpu OK :', sess.get_providers())
 '@
-    & "$ROOT\venvs\face\Scripts\python.exe" -c $ortCudaScript $ROOT
+    & "$ROOT\venvs\face\Scripts\python.exe" -c $ortCudaScript $ROOT 2>$null
     if ($LASTEXITCODE -ne 0) {
         warn "onnxruntime-gpu inutilisable -> repli sur onnxruntime CPU."
         warn "Pour activer le GPU sur InsightFace : CUDA Toolkit 13 + cuDNN 9 doivent etre installes."
