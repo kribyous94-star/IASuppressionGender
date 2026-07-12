@@ -180,9 +180,9 @@ if ($gpu) {
     $cudaCheck = @'
 import torch, sys
 if not torch.cuda.is_available():
-    print("  [warn] torch.cuda.is_available() == False")
+    print('  [warn] torch.cuda.is_available() == False')
     sys.exit(1)
-print("  torch CUDA OK :", torch.cuda.get_device_name(0))
+print('  torch CUDA OK :', torch.cuda.get_device_name(0))
 '@
     & "$ROOT\venvs\body\Scripts\python.exe" -c $cudaCheck
     if ($LASTEXITCODE -ne 0) {
@@ -195,12 +195,12 @@ info "modeles : InsightFace buffalo_l -> models\insightface\"
 $insightScript = @'
 import sys
 from insightface.app import FaceAnalysis
-root = sys.argv[1] + "/models/insightface"
-app = FaceAnalysis(name="buffalo_l", root=root,
-                   allowed_modules=["detection", "genderage"],
-                   providers=["CPUExecutionProvider"])
+root = sys.argv[1] + '/models/insightface'
+app = FaceAnalysis(name='buffalo_l', root=root,
+                   allowed_modules=['detection', 'genderage'],
+                   providers=['CPUExecutionProvider'])
 app.prepare(ctx_id=-1, det_size=(640, 640))
-print("  buffalo_l OK")
+print('  buffalo_l OK')
 '@
 & "$ROOT\venvs\face\Scripts\python.exe" -c $insightScript $ROOT
 if ($LASTEXITCODE -ne 0) { err "Echec du telechargement du modele InsightFace buffalo_l." }
@@ -210,10 +210,10 @@ if ($gpu) {
     $ortCudaScript = @'
 import glob, sys
 import onnxruntime as ort
-model = glob.glob(sys.argv[1] + "/models/insightface/models/buffalo_l/det_*.onnx")[0]
-sess = ort.InferenceSession(model, providers=["CUDAExecutionProvider"])
-assert "CUDAExecutionProvider" in sess.get_providers(), sess.get_providers()
-print("  onnxruntime-gpu OK :", sess.get_providers())
+model = glob.glob(sys.argv[1] + '/models/insightface/models/buffalo_l/det_*.onnx')[0]
+sess = ort.InferenceSession(model, providers=['CUDAExecutionProvider'])
+assert 'CUDAExecutionProvider' in sess.get_providers(), sess.get_providers()
+print('  onnxruntime-gpu OK :', sess.get_providers())
 '@
     & "$ROOT\venvs\face\Scripts\python.exe" -c $ortCudaScript $ROOT
     if ($LASTEXITCODE -ne 0) {
@@ -238,9 +238,9 @@ $clipScript = @'
 import sys
 import open_clip
 open_clip.create_model_and_transforms(
-    "ViT-B-32", pretrained="laion2b_s34b_b79k",
-    cache_dir=sys.argv[1] + "/models/openclip")
-print("  CLIP OK")
+    'ViT-B-32', pretrained='laion2b_s34b_b79k',
+    cache_dir=sys.argv[1] + '/models/openclip')
+print('  CLIP OK')
 '@
 & "$ROOT\venvs\body\Scripts\python.exe" -c $clipScript $ROOT
 if ($LASTEXITCODE -ne 0) { err "Echec du telechargement du modele CLIP." }
