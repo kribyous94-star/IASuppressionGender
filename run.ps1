@@ -20,9 +20,10 @@ if (-not (Test-Path $PY)) {
 $env:HF_HOME                  = "$ROOT\.cache\huggingface"
 $env:TORCH_HOME               = "$ROOT\.cache\torch"
 $env:YOLO_CONFIG_DIR          = "$ROOT\.cache\ultralytics"
-$env:GRADIO_TEMP_DIR          = "$ROOT\.cache\gradio"
+# GRADIO_TEMP_DIR non force : laisser Gradio utiliser %TEMP%\gradio
+# (forcer un chemin projet cause des PermissionError sur Windows/Norton)
 
-foreach ($d in @($env:YOLO_CONFIG_DIR, $env:GRADIO_TEMP_DIR, "$ROOT\output")) {
+foreach ($d in @($env:YOLO_CONFIG_DIR, "$ROOT\output")) {
     if (-not (Test-Path $d)) { New-Item -ItemType Directory -Force $d | Out-Null }
 }
 

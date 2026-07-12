@@ -11,17 +11,11 @@ Flux en deux étapes :
    à partir du tableau, sans relancer l'analyse.
 """
 import argparse
-import asyncio
 import json
 import queue
 import sys
 import threading
 from pathlib import Path
-
-# Sur Windows, ProactorEventLoop leve ConnectionResetError (WinError 10054)
-# a chaque fermeture de connexion navigateur. SelectorEventLoop l'evite.
-if sys.platform == "win32":
-    asyncio.set_event_loop_policy(asyncio.WindowsSelectorEventLoopPolicy())
 
 import gradio as gr
 import psutil
