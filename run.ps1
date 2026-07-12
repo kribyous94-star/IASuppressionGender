@@ -11,6 +11,7 @@ $ROOT = $PSScriptRoot
 $PY   = "$ROOT\venvs\core\Scripts\python.exe"
 
 if (-not (Test-Path $PY)) {
+    [Console]::OutputEncoding = [System.Text.Encoding]::UTF8
     Write-Host "[erreur] venvs manquants : lancez d'abord .\install.ps1" -ForegroundColor Red
     exit 1
 }

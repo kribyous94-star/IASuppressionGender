@@ -3,19 +3,19 @@
 # supprimer le dossier supprime toute l'installation.
 #
 # Usage :
-#   .\install.ps1          # CPU (defaut)
-#   .\install.ps1 --gpu    # GPU NVIDIA : torch CUDA + onnxruntime-gpu
+#   .\install.ps1           # detection GPU automatique (recommande)
+#   .\install.ps1 --cpu     # forcer CPU meme si un GPU NVIDIA est present
+#   .\install.ps1 --gpu     # forcer GPU (echec si nvidia-smi absent)
 #
 # Pre-requis Windows :
 #   - Python 3.10+ : https://python.org  (cocher "Add Python to PATH")
 #   - Pour insightface (compilation C++) :
 #       Visual Studio Build Tools avec "Developpement Desktop en C++"
 #       https://visualstudio.microsoft.com/fr/visual-cpp-build-tools/
-#   - Pour GPU uniquement : CUDA Toolkit 12.x + cuDNN installes sur le systeme
+#   - Pour GPU : CUDA Toolkit 12.x + pilote NVIDIA recents
 #       https://developer.nvidia.com/cuda-downloads
-#       https://developer.nvidia.com/cudnn
 
-param([switch]$gpu)
+param([switch]$gpu, [switch]$cpu)
 
 $ROOT = $PSScriptRoot
 
@@ -69,13 +69,32 @@ if ($LASTEXITCODE -ne 0) {
 python -c "import venv" 2>$null
 if ($LASTEXITCODE -ne 0) { err "module venv manquant. Reinstallez Python depuis https://python.org." }
 
-if ($gpu) {
+# ---------------------------------------------------------------- detection GPU
+# Priorite : --gpu force GPU, --cpu force CPU, sinon auto-detection
+if ($cpu) {
+    $gpu = $false
+    info "mode CPU force par --cpu."
+} elseif ($gpu) {
     $smi = Get-Command nvidia-smi -ErrorAction SilentlyContinue
     if (-not $smi) {
-        err "--gpu demande mais nvidia-smi introuvable. Installez le pilote NVIDIA et le CUDA Toolkit."
+        err "--gpu demande mais nvidia-smi introuvable. Installez le pilote NVIDIA et CUDA Toolkit."
     }
+} else {
+    # Auto-detection : GPU si nvidia-smi repond avec succes
+    $smi = Get-Command nvidia-smi -ErrorAction SilentlyContinue
+    if ($smi) {
+        nvidia-smi --query-gpu=name --format=csv,noheader 2>$null | Out-Null
+        $gpu = ($LASTEXITCODE -eq 0)
+    } else {
+        $gpu = $false
+    }
+    if ($gpu) { info "GPU NVIDIA detecte -> installation variante CUDA." }
+    else       { info "Pas de GPU NVIDIA detecte -> installation variante CPU." }
+}
+
+if ($gpu) {
     $gpuName = (nvidia-smi --query-gpu=name,driver_version --format=csv,noheader | Select-Object -First 1)
-    info "GPU detecte : $gpuName"
+    info "GPU : $gpuName"
 }
 
 # Tous les caches restent dans le dossier du projet
