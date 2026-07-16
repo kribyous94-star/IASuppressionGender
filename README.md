@@ -99,7 +99,9 @@ Options principales (voir `./cli.sh --help` pour tout) :
 2. **Fusion** : les résultats sont combinés (un seul détecteur positif suffit),
    étendus temporellement (`--pad`, `--gap`) et convertis en **plages** en
    secondes — exportables dans un fichier JSON éditable à la main ou dans
-   l'interface (désactiver/ajuster/ajouter des plages).
+   l'interface (désactiver/ajuster/ajouter des plages). Le fichier suit le
+   format **« ummahverse-filter-list »** (`action: HIDE_VIDEO`), réutilisable
+   tel quel dans d'autres logiciels compatibles (voir ARCHITECTURE.md §4.5).
 3. **Rendu** : la vidéo est réécrite avec des frames noires sur les plages
    actives, puis l'audio original est remixé via le ffmpeg statique embarqué.
    Le rendu peut être relancé depuis des plages éditées sans refaire l'analyse.

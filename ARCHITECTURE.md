@@ -134,29 +134,34 @@ Sortie (seules les frames avec détections apparaissent) :
 ### 4.5 Fichier de plages (sortie éditable)
 
 La fusion produit des plages en secondes, exportables en JSON
-(`<sortie>.plages.json`) :
+(`<sortie>.plages.json`) au format **« ummahverse-filter-list »**, partagé
+avec d'autres logiciels :
 
 ```json
 {
-  "video": "…", "gender": "female", "fps": 25.0, "total_frames": 4521,
-  "created": "2026-07-11T12:00:00",
-  "settings": {"detectors": ["face", "body"], "stride": 3, "…": "…"},
+  "format": "ummahverse-filter-list",
+  "version": 1,
+  "title": "Hide",
+  "exportedAt": "2026-07-16T11:13:23.313Z",
   "ranges": [
-    {"start": 1.2, "end": 3.48,
-     "start_hms": "0:00:01.200", "end_hms": "0:00:03.480", "enabled": true},
-    {"start": 10.0, "end": 12.5,
-     "start_hms": "0:00:10.000", "end_hms": "0:00:12.500", "enabled": false}
+    {"id": "rmrmacwft2", "end": 3.48, "start": 1.2,
+     "action": "HIDE_VIDEO", "message": "Scène Masquée"},
+    {"id": "rmrmadwgn3", "end": 12.5, "start": 10,
+     "action": "HIDE_VIDEO", "message": "Scène Masquée", "enabled": false}
   ]
 }
 ```
 
 Ce fichier est le **format d'échange éditable** : on peut désactiver une plage
-(`enabled: false`), ajuster `start`/`end`, ou ajouter une entrée — à la main,
-ou via le tableau de l'interface (qui sait aussi l'importer pour sauter
-l'analyse). `start`/`end` font foi et acceptent un nombre de secondes **ou**
-une chaîne « h:mm:ss.mmm » (conversions dans `src/timefmt.py`) ;
-`start_hms`/`end_hms` sont des équivalents lisibles, régénérés à chaque
-écriture. `pipeline.render_from_ranges()` (CLI : `--ranges fichier.json`)
+(`"enabled": false` — clé propre à ce logiciel, écrite seulement pour les
+plages désactivées, ignorée par les autres outils ; absente = active),
+ajuster `start`/`end`, ou ajouter une entrée — à la main, ou via le tableau
+de l'interface (qui sait aussi l'importer pour sauter l'analyse).
+`start`/`end` sont en secondes et acceptent aussi, à la lecture, une chaîne
+« h:mm:ss.mmm » (conversions dans `src/timefmt.py`). À l'export, `action` et
+`message` valent par défaut `HIDE_VIDEO` / « Scène Masquée » ; à l'import,
+seules les plages dont l'action est `HIDE_VIDEO` (ou absente) sont retenues.
+`pipeline.render_from_ranges()` (CLI : `--ranges fichier.json`)
 rend ensuite la vidéo sans relancer la détection.
 Les sorties sont sélectionnables : vidéo, fichier de plages, ou les deux
 (CLI : `--out video|plages|both` ; interface : cases à cocher).
