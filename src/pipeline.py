@@ -7,6 +7,7 @@ détections, puis rend la vidéo avec les frames flaguées remplacées par du no
 import datetime
 import json
 import os
+import random
 import shutil
 import subprocess
 import sys
@@ -21,7 +22,7 @@ sys.path.insert(0, str(ROOT / "src"))
 from fusion import (fuse, seconds_to_frames, spans_to_frames,  # noqa: E402
                     spans_to_seconds)
 from render import render  # noqa: E402
-from timefmt import fmt_hms, parse_time  # noqa: E402
+from timefmt import parse_time  # noqa: E402
 
 # Registre des détecteurs : en ajouter un = ajouter une entrée ici
 # (+ son venv dans install.sh et son script dans src/detectors/).
@@ -111,31 +112,53 @@ def video_meta(video):
     return fps, total
 
 
-def write_ranges_file(path, video, gender, fps, total_frames, ranges,
-                      settings=None):
-    """Écrit le fichier de plages (JSON éditable, cf. ARCHITECTURE.md §4.5).
+def _range_id():
+    """Identifiant de plage façon JS (`Date.now().toString(36)` + aléa)."""
+    alphabet = "0123456789abcdefghijklmnopqrstuvwxyz"
+    n, s = int(time.time() * 1000), ""
+    while n:
+        n, r = divmod(n, 36)
+        s = alphabet[r] + s
+    return s + "".join(random.choices(alphabet, k=2))
 
-    start/end (secondes) font foi ; start_hms/end_hms sont des équivalents
-    lisibles, régénérés à chaque écriture. À l'édition, start/end acceptent
-    aussi une chaîne « h:mm:ss.mmm ».
+
+def _seconds(value):
+    """Secondes arrondies au millième, en entier si la valeur est ronde."""
+    v = round(parse_time(value) or 0.0, 3)
+    return int(v) if v == int(v) else v
+
+
+def write_ranges_file(path, ranges, title="Hide"):
+    """Écrit le fichier de plages au format « ummahverse-filter-list »
+    (cf. ARCHITECTURE.md §4.5), partagé avec d'autres logiciels.
+
+    start/end (secondes) font foi ; à la lecture ils acceptent aussi une
+    chaîne « h:mm:ss.mmm ». La clé `enabled` (propre à ce logiciel) n'est
+    écrite que pour les plages désactivées, afin que les fichiers restent
+    conformes au format commun ; absente = plage active.
     """
     path = Path(path)
     path.parent.mkdir(parents=True, exist_ok=True)
-    ranges = [{
-        "start": (s := round(parse_time(r.get("start")) or 0.0, 3)),
-        "end": (e := round(parse_time(r.get("end")) or 0.0, 3)),
-        "start_hms": fmt_hms(s),
-        "end_hms": fmt_hms(e),
-        "enabled": bool(r.get("enabled", True)),
-    } for r in ranges]
+    entries = []
+    for r in ranges:
+        entry = {
+            "id": r.get("id") or _range_id(),
+            "end": _seconds(r.get("end")),
+            "start": _seconds(r.get("start")),
+            "action": r.get("action", "HIDE_VIDEO"),
+            "message": r.get("message", "Scène Masquée"),
+        }
+        if not r.get("enabled", True):
+            entry["enabled"] = False
+        entries.append(entry)
     data = {
-        "video": str(video),
-        "gender": gender,
-        "fps": fps,
-        "total_frames": total_frames,
-        "created": datetime.datetime.now().isoformat(timespec="seconds"),
-        "settings": settings or {},
-        "ranges": ranges,
+        "format": "ummahverse-filter-list",
+        "version": 1,
+        "title": title,
+        "exportedAt": datetime.datetime.now(datetime.timezone.utc)
+                      .isoformat(timespec="milliseconds")
+                      .replace("+00:00", "Z"),
+        "ranges": entries,
     }
     with open(path, "w") as f:
         json.dump(data, f, indent=2, ensure_ascii=False)
@@ -153,6 +176,10 @@ def render_from_ranges(video, ranges, output=None, log=print):
     if isinstance(ranges, (str, Path)):
         with open(ranges) as f:
             ranges = json.load(f)["ranges"]
+    # seules les plages HIDE_VIDEO nous concernent (les fichiers du format
+    # commun peuvent contenir d'autres actions, ex. coupure du son)
+    ranges = [r for r in ranges
+              if r.get("action", "HIDE_VIDEO") == "HIDE_VIDEO"]
     output = Path(output).resolve() if output else \
         video.parent / f"{video.stem}_censored.mp4"
     output.parent.mkdir(parents=True, exist_ok=True)
@@ -200,9 +227,6 @@ def run_job(video, gender, output=None, detectors=("face", "body"), stride=3,
 
     thr = {n: DETECTORS[n]["default_thr"] for n in DETECTORS}
     thr.update(thresholds or {})
-    settings = {"detectors": list(detectors), "stride": stride, "pad": pad,
-                "gap": gap, "thresholds": {n: thr[n] for n in detectors},
-                "strict": strict}
 
     work_dir = ROOT / "work" / video.stem
     work_dir.mkdir(parents=True, exist_ok=True)
@@ -231,8 +255,7 @@ def run_job(video, gender, output=None, detectors=("face", "body"), stride=3,
 
         # 3. Sorties demandées : fichier de plages et/ou vidéo
         if "ranges" in outputs:
-            stats["ranges_file"] = write_ranges_file(
-                ranges_path, video, target, fps, total, ranges, settings)
+            stats["ranges_file"] = write_ranges_file(ranges_path, ranges)
             log(f"[ok] plages écrites : {ranges_path}")
         if "video" in outputs:
             output.parent.mkdir(parents=True, exist_ok=True)

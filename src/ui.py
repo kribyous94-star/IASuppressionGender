@@ -193,10 +193,7 @@ def analyse(video, genre, detectors, stride, pad, gap,
                      f"lancez l'étape 2.")
         table = _ranges_to_table(stats["ranges"])
         state = {"video": video, "gender": GENDER_CHOICES[genre],
-                 "fps": stats["fps"], "total": stats["total"],
-                 "settings": {"detectors": list(detectors),
-                              "stride": int(stride), "pad": float(pad),
-                              "gap": float(gap), "strict": bool(strict)}}
+                 "fps": stats["fps"], "total": stats["total"]}
         yield ("\n".join(lines[-LOG_MAX_LINES:]), table, state,
                [list(r) for r in table])
 
@@ -211,19 +208,23 @@ def import_ranges(video, ranges_file, genre):
     try:
         with open(ranges_file) as f:
             data = json.load(f)
-        ranges = data["ranges"]
+        # seules les plages HIDE_VIDEO nous concernent (le format commun
+        # peut contenir d'autres actions, ex. coupure du son)
+        ranges = [r for r in data["ranges"]
+                  if r.get("action", "HIDE_VIDEO") == "HIDE_VIDEO"]
     except (OSError, json.JSONDecodeError, KeyError) as e:
         raise gr.Error(f"fichier de plages illisible : {e}")
 
     table = _ranges_to_table(ranges)
     fps, total = video_meta(video)
-    state = {"video": video,
-             "gender": data.get("gender", GENDER_CHOICES[genre]),
-             "fps": fps, "total": total,
-             "settings": data.get("settings", {})}
+    state = {"video": video, "gender": GENDER_CHOICES[genre],
+             "fps": fps, "total": total}
+    ignored = len(data["ranges"]) - len(ranges)
     log = (f"✅ {len(table)} plage(s) importée(s) depuis "
-           f"{Path(ranges_file).name} (aucune analyse). Vérifiez/éditez le "
-           f"tableau puis lancez l'étape 2.")
+           f"{Path(ranges_file).name} (aucune analyse)"
+           + (f" — {ignored} plage(s) ignorée(s), action ≠ HIDE_VIDEO"
+              if ignored else "")
+           + ". Vérifiez/éditez le tableau puis lancez l'étape 2.")
     return log, table, state, [list(r) for r in table]
 
 
@@ -246,8 +247,7 @@ def generate(state, table, outs):
     ranges_file = None
     if OUT_RANGES in outs:
         ranges_file = write_ranges_file(
-            out_dir / f"{stem}.plages.json", state["video"], state["gender"],
-            state["fps"], state["total"], ranges, state["settings"])
+            out_dir / f"{stem}.plages.json", ranges)
 
     if OUT_VIDEO not in outs:
         done = f"✅ Fichier de plages écrit : {ranges_file}"
