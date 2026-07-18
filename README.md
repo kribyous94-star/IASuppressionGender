@@ -52,11 +52,16 @@ navigateur, en deux étapes :
    h:mm:ss.mmm**, les deux formats éditables et synchronisés). Alternative
    sans analyse : **importer un fichier de plages** existant (accordéon
    « …ou importer des plages existantes »).
-2. **Éditer puis générer** : dans le tableau, décochez une plage pour la
-   désactiver, modifiez son début/sa fin (en secondes ou en h:mm:ss), ou
-   ajoutez-en une (➕). Choisissez les sorties — **vidéo censurée**,
-   **fichier de plages (JSON)**, ou les deux — puis générez (aucune nouvelle
-   analyse, c'est immédiat). Les sorties vont dans `output/`.
+2. **Éditer puis générer** : **cliquez sur une plage** — la vidéo saute à son
+   début et un panneau d'édition s'ouvre : **action** (cacher l'image
+   entière + message, cacher une zone x/y/w/h en % de l'image, couper le
+   son, sauter la plage), début/fin par saisie ou boutons **« = position
+   vidéo »**, suppression. Décochez « Active » pour désactiver une plage,
+   ajoutez-en une à la position courante (➕). L'**aperçu filtré** applique
+   les plages au lecteur en direct (écran noir, zones, son coupé, sauts) —
+   décochez la case pour revoir la vidéo brute. Choisissez les sorties —
+   **vidéo censurée**, **fichier de plages (JSON)**, ou les deux — puis
+   générez (aucune nouvelle analyse). Les sorties vont dans `output/`.
 
 Options : `--port N`, `--no-browser`.
 
@@ -99,12 +104,15 @@ Options principales (voir `./cli.sh --help` pour tout) :
 2. **Fusion** : les résultats sont combinés (un seul détecteur positif suffit),
    étendus temporellement (`--pad`, `--gap`) et convertis en **plages** en
    secondes — exportables dans un fichier JSON éditable à la main ou dans
-   l'interface (désactiver/ajuster/ajouter des plages). Le fichier suit le
-   format **« ummahverse-filter-list »** (`action: HIDE_VIDEO`), réutilisable
-   tel quel dans d'autres logiciels compatibles (voir ARCHITECTURE.md §4.5).
-3. **Rendu** : la vidéo est réécrite avec des frames noires sur les plages
-   actives, puis l'audio original est remixé via le ffmpeg statique embarqué.
-   Le rendu peut être relancé depuis des plages éditées sans refaire l'analyse.
+   l'interface (désactiver/ajuster/ajouter des plages, changer l'action).
+   Le fichier suit le format **« ummahverse-filter-list »** avec ses quatre
+   actions — `HIDE_VIDEO`, `HIDE_ZONE`, `MUTE_AUDIO`, `SKIP` — réutilisable
+   tel quel dans les deux logiciels (voir ARCHITECTURE.md §4.5).
+3. **Rendu** : la vidéo est réécrite en appliquant chaque action (frames
+   noires, zones cachées, plages sautées), puis l'audio original — coupé sur
+   les plages `MUTE_AUDIO`/`SKIP` — est remixé via le ffmpeg statique
+   embarqué. Le rendu peut être relancé depuis des plages éditées sans
+   refaire l'analyse.
 
 Détails complets : [ARCHITECTURE.md](ARCHITECTURE.md).
 

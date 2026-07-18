@@ -19,10 +19,14 @@ import cv2
 ROOT = Path(__file__).resolve().parent.parent
 
 sys.path.insert(0, str(ROOT / "src"))
-from fusion import (fuse, seconds_to_frames, spans_to_frames,  # noqa: E402
+from fusion import (fuse, render_plan, spans_to_frames,  # noqa: E402
                     spans_to_seconds)
 from render import render  # noqa: E402
 from timefmt import parse_time  # noqa: E402
+
+# Actions du format « ummahverse-filter-list » (cf. ARCHITECTURE.md §4.5)
+ACTIONS = ("HIDE_VIDEO", "HIDE_ZONE", "MUTE_AUDIO", "SKIP")
+DEFAULT_ZONE = {"x": 25.0, "y": 25.0, "w": 50.0, "h": 50.0}
 
 # Registre des détecteurs : en ajouter un = ajouter une entrée ici
 # (+ son venv dans install.sh et son script dans src/detectors/).
@@ -128,26 +132,49 @@ def _seconds(value):
     return int(v) if v == int(v) else v
 
 
+def _clean_zone(zone):
+    """Zone {x,y,w,h} en % de l'image, bornée à [0,100] (None si invalide)."""
+    try:
+        x = min(100.0, max(0.0, float(zone["x"])))
+        y = min(100.0, max(0.0, float(zone["y"])))
+        w = min(100.0 - x, max(0.1, float(zone["w"])))
+        h = min(100.0 - y, max(0.1, float(zone["h"])))
+    except (TypeError, KeyError, ValueError):
+        return None
+    return {"x": round(x, 1), "y": round(y, 1),
+            "w": round(w, 1), "h": round(h, 1)}
+
+
 def write_ranges_file(path, ranges, title="Hide"):
     """Écrit le fichier de plages au format « ummahverse-filter-list »
     (cf. ARCHITECTURE.md §4.5), partagé avec d'autres logiciels.
 
     start/end (secondes) font foi ; à la lecture ils acceptent aussi une
-    chaîne « h:mm:ss.mmm ». La clé `enabled` (propre à ce logiciel) n'est
-    écrite que pour les plages désactivées, afin que les fichiers restent
-    conformes au format commun ; absente = plage active.
+    chaîne « h:mm:ss.mmm ». Champs par action (mêmes règles que la
+    validation d'ummah-verse) : message pour HIDE_VIDEO (défaut « Scène
+    Masquée »), zone {x,y,w,h en %} pour HIDE_ZONE. La clé `enabled`
+    (propre à ce logiciel) n'est écrite que pour les plages désactivées,
+    afin que les fichiers restent conformes au format commun.
     """
     path = Path(path)
     path.parent.mkdir(parents=True, exist_ok=True)
     entries = []
-    for r in ranges:
+    for r in sorted(ranges, key=lambda r: parse_time(r.get("start")) or 0.0):
+        action = r.get("action", "HIDE_VIDEO")
+        if action not in ACTIONS:
+            action = "HIDE_VIDEO"
         entry = {
             "id": r.get("id") or _range_id(),
             "end": _seconds(r.get("end")),
             "start": _seconds(r.get("start")),
-            "action": r.get("action", "HIDE_VIDEO"),
-            "message": r.get("message", "Scène Masquée"),
+            "action": action,
         }
+        if action == "HIDE_VIDEO":
+            entry["message"] = str(r.get("message") or "Scène Masquée")
+        elif action == "HIDE_ZONE":
+            entry["zone"] = _clean_zone(r.get("zone")) or dict(DEFAULT_ZONE)
+        if r.get("label"):
+            entry["label"] = str(r["label"])
         if not r.get("enabled", True):
             entry["enabled"] = False
         entries.append(entry)
@@ -167,8 +194,10 @@ def write_ranges_file(path, ranges, title="Hide"):
 
 def render_from_ranges(video, ranges, output=None, log=print):
     """Rend la vidéo censurée à partir de plages en secondes — soit la liste
-    [{start, end, enabled}], soit le chemin d'un fichier de plages (JSON),
-    éventuellement édité à la main. Aucune détection n'est relancée.
+    [{start, end, action, …}], soit le chemin d'un fichier de plages (JSON),
+    éventuellement édité à la main. Toutes les actions du format sont
+    appliquées (image cachée, zone cachée, son coupé, plage sautée).
+    Aucune détection n'est relancée.
     """
     video = Path(video).resolve()
     if not video.is_file():
@@ -176,21 +205,19 @@ def render_from_ranges(video, ranges, output=None, log=print):
     if isinstance(ranges, (str, Path)):
         with open(ranges) as f:
             ranges = json.load(f)["ranges"]
-    # seules les plages HIDE_VIDEO nous concernent (les fichiers du format
-    # commun peuvent contenir d'autres actions, ex. coupure du son)
-    ranges = [r for r in ranges
-              if r.get("action", "HIDE_VIDEO") == "HIDE_VIDEO"]
     output = Path(output).resolve() if output else \
         video.parent / f"{video.stem}_censored.mp4"
     output.parent.mkdir(parents=True, exist_ok=True)
 
     fps, total = video_meta(video)
     active = [r for r in ranges if r.get("enabled", True)]
-    flagged = seconds_to_frames(ranges, fps, total)
+    plan = render_plan(ranges, fps, total)
+    flagged = plan["black"]
     pct = 100 * len(flagged) / max(total, 1)
-    log(f"[rendu] {len(active)} plage(s) active(s) → {len(flagged)}/{total} "
-        f"frames noircies ({pct:.1f}%)")
-    render(video, output, flagged,
+    log(f"[rendu] {len(active)} plage(s) active(s) : {len(flagged)}/{total} "
+        f"frames noircies ({pct:.1f}%), {len(plan['zones'])} avec zone cachée, "
+        f"{len(plan['skip'])} sautées, {len(plan['mute_s'])} plage(s) sans son")
+    render(video, output, plan,
            progress=lambda i, t: log(f"[rendu] {i}/{t} frames"))
     log(f"[ok] vidéo écrite : {output}")
     return {"output": str(output), "flagged": len(flagged),
@@ -260,7 +287,7 @@ def run_job(video, gender, output=None, detectors=("face", "body"), stride=3,
         if "video" in outputs:
             output.parent.mkdir(parents=True, exist_ok=True)
             log("[rendu] écriture de la vidéo…")
-            render(video, output, flagged)
+            render(video, output, {"black": flagged})
             stats["output"] = str(output)
             log(f"[ok] vidéo écrite : {output}")
     finally:
