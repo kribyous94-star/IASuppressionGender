@@ -5,17 +5,22 @@ réseau externe). Utilise le même moteur que la CLI (pipeline.py).
 
 Flux en deux étapes :
 1. Analyser la vidéo — ou importer un fichier de plages existant pour sauter
-   l'analyse — → tableau de plages éditables ;
-2. Éditer les plages (action : cacher l'image, cacher une zone, couper le son,
-   sauter ; début/fin par saisie ou « = position vidéo » ; clic sur une plage
-   → la vidéo saute à son début ; aperçu filtré appliqué en direct au lecteur),
-   puis générer les sorties choisies sans relancer l'analyse.
+   l'analyse — → liste de plages éditables ;
+2. Éditer les plages, présentées en cartes façon éditeur ummah-verse : chaque
+   plage a ses boutons ▶ (aller à la plage), ⏱ (= position vidéo, début et
+   fin), son action (cacher l'image, cacher une zone, couper le son, sauter),
+   sa case Active et sa suppression ; sélection multiple + suppression en
+   masse ; aperçu filtré appliqué en direct au lecteur. Puis générer les
+   sorties choisies sans relancer l'analyse.
 """
 import argparse
 import json
+import math
 import queue
 import sys
 import threading
+import uuid
+from functools import partial
 from pathlib import Path
 
 # ProactorEventLoop (Windows default) leve ConnectionResetError (WinError 10054)
@@ -55,10 +60,7 @@ ACTION_LABELS = {
 }
 LABEL_TO_ACTION = {v: k for k, v in ACTION_LABELS.items()}
 
-TABLE_HEADERS = ["Début (s)", "Fin (s)", "Début (h:m:s)", "Fin (h:m:s)",
-                 "Action", "Zone x,y,w,h (%)", "Message", "Active"]
-COL_ACTION, COL_ZONE, COL_MSG, COL_ON = 4, 5, 6, 7
-ROW_DEFAULTS = [None, None, "", "", ACTION_LABELS["HIDE_VIDEO"], "", "", True]
+PAGE_SIZE = 20  # plages par page, comme l'éditeur d'ummah-verse
 LOG_MAX_LINES = 60
 
 # Lit la position courante du lecteur (0 si aucune vidéo chargée)
@@ -77,6 +79,10 @@ HEAD_JS = """
     update();
   };
   window.iasgSetApply = (v) => { S.apply = !!v; update(); };
+  window.iasgSeek = (t) => {
+    const v = video();
+    if (v && isFinite(t)) v.currentTime = Math.max(0, t);
+  };
 
   const video = () => document.querySelector('#iasg-video video');
 
@@ -223,117 +229,135 @@ def _stream(worker_fn):
     yield lines, result["value"]
 
 
-# ── Conversions tableau ↔ plages ─────────────────────────────────────────────
+# ── Modèle : liste de plages (état) ──────────────────────────────────────────
+# Une plage = {id, start, end, action, zone|None, message, enabled}
 
-def _action_of(cell):
-    """Cellule « Action » → action du format (libellé français ou brut)."""
-    s = str(cell or "").strip()
-    return LABEL_TO_ACTION.get(s, s if s in ACTIONS else "HIDE_VIDEO")
-
-
-def _zone_to_str(zone):
-    if not zone:
-        return ""
-    return (f"{zone['x']:g},{zone['y']:g},{zone['w']:g},{zone['h']:g}")
+def _new_id():
+    return uuid.uuid4().hex[:12]
 
 
-def _zone_from_str(s):
-    parts = str(s or "").replace(";", ",").split(",")
-    try:
-        x, y, w, h = (float(p.replace(",", ".").strip()) for p in parts)
-    except ValueError:
+def _new_range(start, end, action="HIDE_VIDEO"):
+    return {"id": _new_id(), "start": round(start, 3), "end": round(end, 3),
+            "action": action, "zone": None, "message": "", "enabled": True}
+
+
+def _norm_range(r):
+    """Plage venant d'un fichier → plage normalisée (None si invalide)."""
+    start, end = parse_time(r.get("start")), parse_time(r.get("end"))
+    action = r.get("action", "HIDE_VIDEO")
+    if start is None or end is None or end <= start or action not in ACTIONS:
         return None
-    return {"x": x, "y": y, "w": w, "h": h}
+    zone = r.get("zone")
+    return {"id": str(r.get("id") or _new_id())[:40],
+            "start": round(start, 3), "end": round(end, 3), "action": action,
+            "zone": dict(zone) if isinstance(zone, dict) else None,
+            "message": str(r.get("message") or ""),
+            "enabled": bool(r.get("enabled", True))}
 
 
-def _row(start, end, action="HIDE_VIDEO", zone=None, message="", enabled=True):
-    return [round(start, 3), round(end, 3), fmt_hms(start), fmt_hms(end),
-            ACTION_LABELS.get(action, ACTION_LABELS["HIDE_VIDEO"]),
-            _zone_to_str(zone), str(message or ""), bool(enabled)]
+def _ranges_json(ranges):
+    """Plages → JSON poussé au lecteur (aperçu filtré en direct)."""
+    return json.dumps(ranges or [])
 
 
-def _pad_row(row):
-    row = list(row)[:len(ROW_DEFAULTS)]
-    return row + ROW_DEFAULTS[len(row):]
+def _fmt_s(v):
+    return f"{v:g}"
 
 
-def _row_bounds(row):
-    """(start, end) d'une ligne : colonnes secondes, sinon colonnes h:m:s."""
-    start = parse_time(row[0] if len(row) > 0 else None)
-    end = parse_time(row[1] if len(row) > 1 else None)
-    if start is None and len(row) > 2:
-        start = parse_time(row[2])
-    if end is None and len(row) > 3:
-        end = parse_time(row[3])
-    return start, end
+def _patch(ranges, rid, **patch):
+    return [({**r, **patch} if r["id"] == rid else r) for r in ranges or []]
 
 
-def _table_to_ranges(table):
-    """Tableau de l'interface → plages [{start, end, action, …, enabled}]."""
-    ranges = []
-    for row in table or []:
-        row = _pad_row(row)
-        start, end = _row_bounds(row)
-        if start is None or end is None or end <= start:
-            continue  # ligne vide ou incomplète
-        action = _action_of(row[COL_ACTION])
-        r = {"start": round(start, 3), "end": round(end, 3),
-             "action": action, "enabled": bool(row[COL_ON])}
-        if action == "HIDE_ZONE":
-            r["zone"] = _zone_from_str(row[COL_ZONE]) or dict(DEFAULT_ZONE)
-        if action == "HIDE_VIDEO" and str(row[COL_MSG]).strip():
-            r["message"] = str(row[COL_MSG]).strip()
-        ranges.append(r)
-    return ranges
+def _clamp_page(page, ranges):
+    pages = max(1, math.ceil(len(ranges or []) / PAGE_SIZE))
+    return min(max(int(page or 1), 1), pages)
 
 
-def _ranges_to_table(ranges):
-    rows = []
-    for r in ranges:
-        start, end = parse_time(r.get("start")), parse_time(r.get("end"))
-        if start is None or end is None:
-            continue
-        action = r.get("action", "HIDE_VIDEO")
-        if action not in ACTIONS:
-            continue
-        rows.append(_row(start, end, action, r.get("zone"),
-                         r.get("message", ""), r.get("enabled", True)))
-    return rows
+# ── Mutations d'une plage (rid lié à la carte au rendu) ──────────────────────
+
+def set_bound(rid, which, text, ranges):
+    """Commit d'un champ temps (secondes ou h:mm:ss) ; invalide → inchangé."""
+    v = parse_time(text)
+    if v is not None and v >= 0:
+        ranges = _patch(ranges, rid, **{which: round(v, 3)})
+    return ranges, _ranges_json(ranges)
 
 
-def _ranges_json(table):
-    """Plages du tableau → JSON poussé au lecteur (aperçu filtré en direct)."""
-    return json.dumps(_table_to_ranges(table))
+def set_bound_pos(rid, which, pos, ranges):
+    """Bouton ⏱ : début/fin = position courante du lecteur."""
+    ranges = _patch(ranges, rid, **{which: round(float(pos or 0), 3)})
+    return ranges, _ranges_json(ranges)
 
 
-def sync_table(prev, table):
-    """Après édition d'une cellule, resynchronise secondes ↔ h:mm:ss.
+def set_action(rid, label, ranges):
+    action = LABEL_TO_ACTION.get(label, "HIDE_VIDEO")
+    cur = next((r for r in ranges or [] if r["id"] == rid), None)
+    zone = (cur or {}).get("zone")
+    if action == "HIDE_ZONE" and not zone:
+        zone = dict(DEFAULT_ZONE)
+    ranges = _patch(ranges, rid, action=action, zone=zone)
+    return ranges, _ranges_json(ranges)
 
-    Compare avec l'état précédent pour savoir quelle colonne l'utilisateur a
-    modifiée : les secondes mettent à jour le h:m:s, et inversement.
-    """
-    table = [_pad_row(r) for r in (table or [])]
-    same_shape = prev and len(prev) == len(table)
-    for i, row in enumerate(table):
-        p = prev[i] if same_shape else None
-        for sec_col, hms_col in ((0, 2), (1, 3)):
-            sec, hms = parse_time(row[sec_col]), parse_time(row[hms_col])
-            if p is not None and sec == parse_time(p[sec_col]) \
-                    and hms is not None and hms != parse_time(p[hms_col]):
-                # l'utilisateur a édité la colonne h:m:s → elle fait foi
-                row[sec_col] = round(hms, 3)
-                row[hms_col] = fmt_hms(hms)
-            elif sec is not None:
-                row[sec_col] = round(sec, 3)
-                row[hms_col] = fmt_hms(sec)
-    return table, [list(r) for r in table], _ranges_json(table)
+
+def set_zone(rid, x, y, w, h, ranges):
+    zone = {"x": float(x or 0), "y": float(y or 0),
+            "w": float(w or 0), "h": float(h or 0)}
+    ranges = _patch(ranges, rid, zone=zone)
+    return ranges, _ranges_json(ranges)
+
+
+def set_message(rid, msg, ranges):
+    ranges = _patch(ranges, rid, message=str(msg or ""))
+    return ranges, _ranges_json(ranges)
+
+
+def set_enabled(rid, val, ranges):
+    ranges = _patch(ranges, rid, enabled=bool(val))
+    return ranges, _ranges_json(ranges)
+
+
+def toggle_sel(rid, val, selected):
+    sel = set(selected or [])
+    (sel.add if val else sel.discard)(rid)
+    return sorted(sel)
+
+
+def delete_range(rid, ranges, selected, page):
+    ranges = [r for r in ranges or [] if r["id"] != rid]
+    selected = [i for i in selected or [] if i != rid]
+    return (ranges, selected, _ranges_json(ranges),
+            _clamp_page(page, ranges))
+
+
+def delete_selected(ranges, selected, page):
+    sel = set(selected or [])
+    ranges = [r for r in ranges or [] if r["id"] not in sel]
+    return ranges, [], _ranges_json(ranges), _clamp_page(page, ranges)
+
+
+def toggle_page_sel(page_ids, all_selected, selected):
+    sel = set(selected or [])
+    sel = sel - set(page_ids) if all_selected else sel | set(page_ids)
+    return sorted(sel)
+
+
+def add_range(pos, ranges):
+    """➕ : nouvelle plage de 5 s à la position courante du lecteur."""
+    t = round(float(pos or 0), 3)
+    ranges = list(ranges or []) + [_new_range(t, t + 5.0)]
+    return (ranges, _ranges_json(ranges),
+            _clamp_page(len(ranges), ranges))  # → dernière page
+
+
+def page_delta(delta, page, ranges):
+    return _clamp_page((page or 1) + delta, ranges)
 
 
 # ── Étape 1 : analyse ou import ──────────────────────────────────────────────
 
 def analyse(video, genre, detectors, stride, pad, gap,
             face_thr, body_thr, strict, keep_work):
-    """Étape 1 : détection + fusion → tableau de plages éditables."""
+    """Étape 1 : détection + fusion → liste de plages éditables."""
     if not video:
         raise gr.Error("Choisissez d'abord une vidéo.")
     if not detectors:
@@ -350,18 +374,18 @@ def analyse(video, genre, detectors, stride, pad, gap,
 
     for item, stats in _stream(worker):
         if stats is None:
-            yield item, gr.update(), gr.update(), gr.update(), gr.update()
+            yield (item,) + (gr.update(),) * 5
             continue
         lines = item
         lines.append(f"✅ Analyse terminée : {len(stats['ranges'])} plage(s), "
                      f"{stats['flagged']}/{stats['total']} frames concernées "
-                     f"({stats['pct']:.1f}%). Vérifiez/éditez le tableau puis "
+                     f"({stats['pct']:.1f}%). Vérifiez/éditez les plages puis "
                      f"lancez l'étape 2.")
-        table = _ranges_to_table(stats["ranges"])
+        ranges = [_new_range(r["start"], r["end"]) for r in stats["ranges"]]
         state = {"video": video, "gender": GENDER_CHOICES[genre],
                  "fps": stats["fps"], "total": stats["total"]}
-        yield ("\n".join(lines[-LOG_MAX_LINES:]), table, state,
-               [list(r) for r in table], _ranges_json(table))
+        yield ("\n".join(lines[-LOG_MAX_LINES:]), ranges, state,
+               _ranges_json(ranges), [], 1)
 
 
 def import_ranges(video, ranges_file, genre):
@@ -374,143 +398,33 @@ def import_ranges(video, ranges_file, genre):
     try:
         with open(ranges_file) as f:
             data = json.load(f)
-        ranges = data["ranges"]
+        raw = data["ranges"]
     except (OSError, json.JSONDecodeError, KeyError) as e:
         raise gr.Error(f"fichier de plages illisible : {e}")
 
-    table = _ranges_to_table(ranges)
+    ranges = [r for r in (_norm_range(r) for r in raw) if r]
     fps, total = video_meta(video)
     state = {"video": video, "gender": GENDER_CHOICES[genre],
              "fps": fps, "total": total}
-    ignored = len(ranges) - len(table)
-    log = (f"✅ {len(table)} plage(s) importée(s) depuis "
+    ignored = len(raw) - len(ranges)
+    log = (f"✅ {len(ranges)} plage(s) importée(s) depuis "
            f"{Path(ranges_file).name} (aucune analyse)"
            + (f" — {ignored} plage(s) invalide(s) ignorée(s)"
               if ignored else "")
-           + ". Vérifiez/éditez le tableau puis lancez l'étape 2.")
+           + ". Vérifiez/éditez les plages puis lancez l'étape 2.")
     title = data.get("title") or gr.update()
-    return (log, table, state, [list(r) for r in table],
-            _ranges_json(table), title)
-
-
-# ── Étape 2 : édition des plages ─────────────────────────────────────────────
-
-def _panel_for(row):
-    """Contenu du panneau d'édition pour une ligne du tableau."""
-    start, end = _row_bounds(row)
-    action = _action_of(row[COL_ACTION])
-    zone = _zone_from_str(row[COL_ZONE]) or dict(DEFAULT_ZONE)
-    md = (f"**Plage sélectionnée** : {fmt_hms(start or 0)} → "
-          f"{fmt_hms(end or 0)}")
-    return (md, gr.update(value=ACTION_LABELS[action]),
-            gr.update(visible=action == "HIDE_ZONE"),
-            zone["x"], zone["y"], zone["w"], zone["h"],
-            gr.update(value=str(row[COL_MSG] or ""),
-                      visible=action == "HIDE_VIDEO"))
-
-
-_PANEL_NOOP = (gr.update(),) * 8
-
-
-def on_select(table, evt: gr.SelectData):
-    """Clic sur une ligne : sélectionne la plage, remplit le panneau
-    d'édition et fait sauter la vidéo au début de la plage."""
-    row_idx = evt.index[0] if evt.index else None
-    table = [_pad_row(r) for r in (table or [])]
-    if row_idx is None or not (0 <= row_idx < len(table)):
-        return (None, "Aucune plage sélectionnée.", *_PANEL_NOOP[1:],
-                gr.update(), gr.update(visible=False))
-    start, _ = _row_bounds(table[row_idx])
-    seek = start if start is not None else gr.update()
-    return (row_idx, *_panel_for(table[row_idx]), seek,
-            gr.update(visible=True))
-
-
-def _apply_to_row(sel, table, fn):
-    """Applique fn(row) à la ligne sélectionnée et resynchronise tout."""
-    table = [_pad_row(r) for r in (table or [])]
-    if sel is None or not (0 <= sel < len(table)):
-        return (gr.update(), gr.update(), gr.update(), gr.update())
-    fn(table[sel])
-    row = table[sel]
-    start, end = _row_bounds(row)
-    if start is not None:
-        row[0], row[2] = round(start, 3), fmt_hms(start)
-    if end is not None:
-        row[1], row[3] = round(end, 3), fmt_hms(end)
-    md = (f"**Plage sélectionnée** : {fmt_hms(start or 0)} → "
-          f"{fmt_hms(end or 0)}")
-    return table, [list(r) for r in table], _ranges_json(table), md
-
-
-def set_action(sel, label, table):
-    action = LABEL_TO_ACTION.get(label, "HIDE_VIDEO")
-
-    def fn(row):
-        row[COL_ACTION] = ACTION_LABELS[action]
-        if action == "HIDE_ZONE" and not _zone_from_str(row[COL_ZONE]):
-            row[COL_ZONE] = _zone_to_str(DEFAULT_ZONE)
-
-    out = _apply_to_row(sel, table, fn)
-    zone = _zone_from_str(_pad_row(table[sel])[COL_ZONE]) \
-        if sel is not None and 0 <= sel < len(table or []) else None
-    zone = zone or dict(DEFAULT_ZONE)
-    return (*out, gr.update(visible=action == "HIDE_ZONE"),
-            zone["x"], zone["y"], zone["w"], zone["h"],
-            gr.update(visible=action == "HIDE_VIDEO"))
-
-
-def set_zone(sel, x, y, w, h, table):
-    def fn(row):
-        row[COL_ZONE] = _zone_to_str(
-            {"x": x or 0, "y": y or 0, "w": w or 0, "h": h or 0})
-    return _apply_to_row(sel, table, fn)
-
-
-def set_message(sel, msg, table):
-    def fn(row):
-        row[COL_MSG] = msg or ""
-    return _apply_to_row(sel, table, fn)
-
-
-def set_start(sel, pos, table):
-    def fn(row):
-        row[0] = round(float(pos or 0), 3)
-        row[2] = fmt_hms(row[0])
-    return _apply_to_row(sel, table, fn)
-
-
-def set_end(sel, pos, table):
-    def fn(row):
-        row[1] = round(float(pos or 0), 3)
-        row[3] = fmt_hms(row[1])
-    return _apply_to_row(sel, table, fn)
-
-
-def delete_range(sel, table):
-    table = [_pad_row(r) for r in (table or [])]
-    if sel is not None and 0 <= sel < len(table):
-        del table[sel]
-    return (table, [list(r) for r in table], _ranges_json(table),
-            None, gr.update(visible=False))
-
-
-def add_range(pos, table):
-    """Ajoute une plage de 5 s à la position courante de la vidéo."""
-    t = round(float(pos or 0), 3)
-    table = [_pad_row(r) for r in (table or [])] + [_row(t, t + 5.0)]
-    return table, [list(r) for r in table], _ranges_json(table)
+    return log, ranges, state, _ranges_json(ranges), [], 1, title
 
 
 # ── Étape 2 : génération ─────────────────────────────────────────────────────
 
-def generate(state, table, outs, title):
-    """Étape 2 : produit les sorties choisies à partir du tableau édité."""
+def generate(state, ranges, outs, title):
+    """Étape 2 : produit les sorties choisies à partir des plages éditées."""
     if not state:
         raise gr.Error("Lancez d'abord l'étape 1 (analyse ou import de plages).")
     if not outs:
         raise gr.Error("Choisissez au moins une sortie (vidéo ou fichier).")
-    ranges = _table_to_ranges(table)
+    ranges = ranges or []
 
     stem = Path(state["video"]).stem
     out_dir = ROOT / "output"
@@ -539,24 +453,166 @@ def generate(state, table, outs, title):
         yield "\n".join(lines[-LOG_MAX_LINES:]), stats["output"], ranges_file
 
 
+def ranges_editor(ranges, selected, page, C):
+    """Corps du @gr.render : liste des plages en cartes façon ummah-verse.
+
+    C : composants persistants de build_app (états, JSON de l'aperçu,
+    position vidéo). Chaque carte porte ses propres commandes : sélection,
+    ▶ aller à la plage, début/fin (champ + bouton ⏱ « = position vidéo »),
+    action et champs associés (message / zone), case Active, suppression.
+    """
+    ranges = ranges or []
+    sel = set(selected or [])
+    page = _clamp_page(page, ranges)
+    pages = max(1, math.ceil(len(ranges) / PAGE_SIZE))
+    shown = ranges[(page - 1) * PAGE_SIZE: page * PAGE_SIZE]
+    page_ids = [r["id"] for r in shown]
+    all_sel = bool(page_ids) and all(i in sel for i in page_ids)
+    ranges_state, sel_state = C["ranges_state"], C["sel_state"]
+    page_state, ranges_json = C["page_state"], C["ranges_json"]
+    cur_pos = C["cur_pos"]
+
+    # barre d'outils : compteur, sélection de page, suppression en masse
+    with gr.Row():
+        gr.Markdown(f"**{len(ranges)} plage(s)**"
+                    + (f" — {len(sel)} sélectionnée(s)" if sel else ""))
+        if page_ids:
+            psel_btn = gr.Button(
+                "☐ Désélectionner la page" if all_sel
+                else "☑ Sélectionner la page",
+                size="sm", scale=0, min_width=190)
+            psel_btn.click(partial(toggle_page_sel, page_ids, all_sel),
+                           inputs=[sel_state], outputs=[sel_state])
+        if sel:
+            dsel_btn = gr.Button(f"🗑 Supprimer la sélection ({len(sel)})",
+                                 size="sm", scale=0, variant="stop",
+                                 min_width=200)
+            dsel_btn.click(delete_selected,
+                           inputs=[ranges_state, sel_state, page_state],
+                           outputs=[ranges_state, sel_state, ranges_json,
+                                    page_state])
+
+    if not ranges:
+        gr.Markdown("*Aucune plage : lancez l'analyse, importez un fichier, "
+                    "ou ➕ ajoutez une plage à la main.*")
+
+    for offset, r in enumerate(shown):
+        rid = r["id"]
+        n = (page - 1) * PAGE_SIZE + offset + 1
+        with gr.Group():
+            with gr.Row():
+                sel_chk = gr.Checkbox(value=rid in sel, show_label=False,
+                                      container=False, scale=0, min_width=28)
+                goto_btn = gr.Button("▶", size="sm", scale=0, min_width=36)
+                gr.Markdown(f"**{n}.** {_fmt_s(r['start'])} s → "
+                            f"{_fmt_s(r['end'])} s")
+                on_chk = gr.Checkbox(value=r["enabled"], label="Active",
+                                     container=False, scale=0, min_width=90)
+                del_btn = gr.Button("🗑", size="sm", scale=0, min_width=36,
+                                    variant="stop")
+            with gr.Row():
+                start_tb = gr.Textbox(value=fmt_hms(r["start"]),
+                                      label="Début (s ou h:m:s)", scale=2,
+                                      min_width=110)
+                start_pos_btn = gr.Button("⏱", size="sm", scale=0,
+                                          min_width=36)
+                end_tb = gr.Textbox(value=fmt_hms(r["end"]),
+                                    label="Fin (s ou h:m:s)", scale=2,
+                                    min_width=110)
+                end_pos_btn = gr.Button("⏱", size="sm", scale=0, min_width=36)
+                action_dd = gr.Dropdown(list(ACTION_LABELS.values()),
+                                        value=ACTION_LABELS[r["action"]],
+                                        label="Action", scale=3, min_width=170)
+            if r["action"] == "HIDE_VIDEO":
+                msg_tb = gr.Textbox(value=r["message"],
+                                    label="Message affiché sur l'écran noir",
+                                    placeholder="Scène Masquée")
+                for ev in (msg_tb.submit, msg_tb.blur):
+                    ev(partial(set_message, rid),
+                       inputs=[msg_tb, ranges_state],
+                       outputs=[ranges_state, ranges_json])
+            elif r["action"] == "HIDE_ZONE":
+                zone = r["zone"] or dict(DEFAULT_ZONE)
+                with gr.Row():
+                    zs = [gr.Number(value=zone[k], label=lbl, minimum=0,
+                                    maximum=100, min_width=80)
+                          for k, lbl in (("x", "Zone x (%)"), ("y", "y (%)"),
+                                         ("w", "Largeur (%)"),
+                                         ("h", "Hauteur (%)"))]
+                for z in zs:
+                    for ev in (z.submit, z.blur):
+                        ev(partial(set_zone, rid),
+                           inputs=[*zs, ranges_state],
+                           outputs=[ranges_state, ranges_json])
+
+            sel_chk.input(partial(toggle_sel, rid),
+                          inputs=[sel_chk, sel_state], outputs=[sel_state])
+            on_chk.input(partial(set_enabled, rid),
+                         inputs=[on_chk, ranges_state],
+                         outputs=[ranges_state, ranges_json])
+            goto_btn.click(  # aller à la plage (côté client, sans requête)
+                None, inputs=None, outputs=None,
+                js=f"() => window.iasgSeek({r['start']})")
+            for ev in (start_tb.submit, start_tb.blur):
+                ev(partial(set_bound, rid, "start"),
+                   inputs=[start_tb, ranges_state],
+                   outputs=[ranges_state, ranges_json])
+            for ev in (end_tb.submit, end_tb.blur):
+                ev(partial(set_bound, rid, "end"),
+                   inputs=[end_tb, ranges_state],
+                   outputs=[ranges_state, ranges_json])
+            start_pos_btn.click(None, inputs=None, outputs=[cur_pos],
+                                js=JS_VIDEO_TIME) \
+                .then(partial(set_bound_pos, rid, "start"),
+                      inputs=[cur_pos, ranges_state],
+                      outputs=[ranges_state, ranges_json])
+            end_pos_btn.click(None, inputs=None, outputs=[cur_pos],
+                              js=JS_VIDEO_TIME) \
+                .then(partial(set_bound_pos, rid, "end"),
+                      inputs=[cur_pos, ranges_state],
+                      outputs=[ranges_state, ranges_json])
+            action_dd.input(partial(set_action, rid),
+                            inputs=[action_dd, ranges_state],
+                            outputs=[ranges_state, ranges_json])
+            del_btn.click(partial(delete_range, rid),
+                          inputs=[ranges_state, sel_state, page_state],
+                          outputs=[ranges_state, sel_state, ranges_json,
+                                   page_state])
+
+    if pages > 1:
+        with gr.Row():
+            prev_btn = gr.Button("◀ Page précédente", size="sm",
+                                 interactive=page > 1)
+            gr.Markdown(f"Page **{page} / {pages}**")
+            next_btn = gr.Button("Page suivante ▶", size="sm",
+                                 interactive=page < pages)
+            prev_btn.click(partial(page_delta, -1),
+                           inputs=[page_state, ranges_state],
+                           outputs=[page_state])
+            next_btn.click(partial(page_delta, 1),
+                           inputs=[page_state, ranges_state],
+                           outputs=[page_state])
+
+
 def build_app():
     with gr.Blocks(title="IASuppressionGender") as app:
         gr.Markdown(
             "# IASuppressionGender\n"
             "**Étape 1** : choisissez une vidéo puis analysez-la — ou importez "
             "un fichier de plages existant pour sauter l'analyse. "
-            "**Étape 2** : cliquez sur une plage pour l'éditer (la vidéo saute "
-            "à son début) : action (cacher l'image, cacher une zone, couper le "
-            "son, sauter), début/fin (saisie ou « = position vidéo »), aperçu "
-            "filtré en direct sur le lecteur. Puis générez la vidéo censurée "
+            "**Étape 2** : éditez les plages — ▶ pour aller à la plage dans "
+            "la vidéo, ⏱ pour caler un début/une fin sur la position du "
+            "lecteur, action au choix (cacher l'image, cacher une zone, "
+            "couper le son, sauter), sélection multiple pour supprimer en "
+            "masse, aperçu filtré en direct — puis générez la vidéo censurée "
             "et/ou le fichier de plages (format partagé « ummahverse-filter-"
             "list »). Traitement 100 % local et hors ligne.")
 
         state = gr.State()
-        prev_table = gr.State()
-        sel_row = gr.State()
+        ranges_state = gr.State([])
+        sel_state = gr.State([])
+        page_state = gr.State(1)
         cur_pos = gr.Number(visible=False)   # position vidéo lue côté client
-        seek_pos = gr.Number(visible=False)  # position à atteindre (clic plage)
         ranges_json = gr.Textbox(visible=False)  # plages → aperçu filtré JS
         monitor = gr.HTML(system_stats())
         timer = gr.Timer(2)
@@ -608,42 +664,16 @@ def build_app():
                 log = gr.Textbox(label="Journal", lines=12, max_lines=12,
                                  interactive=False)
             with gr.Column():
-                table = gr.Dataframe(
-                    headers=TABLE_HEADERS,
-                    datatype=["number", "number", "str", "str", "str", "str",
-                              "str", "bool"],
-                    column_count=(len(TABLE_HEADERS), "fixed"),
-                    type="array",
-                    interactive=True,
-                    label="Plages — cliquez sur une ligne pour l'éditer "
-                          "ci-dessous (la vidéo saute à son début), décochez "
-                          "« Active » pour désactiver")
                 add_btn = gr.Button("➕ Ajouter une plage à la position vidéo")
-                with gr.Group(visible=False) as panel:
-                    sel_md = gr.Markdown("Aucune plage sélectionnée.")
-                    with gr.Row():
-                        action_dd = gr.Dropdown(
-                            list(ACTION_LABELS.values()),
-                            label="Action", scale=2)
-                        start_pos_btn = gr.Button("⏱ Début = position vidéo")
-                        end_pos_btn = gr.Button("⏱ Fin = position vidéo")
-                        del_btn = gr.Button("🗑 Supprimer", variant="stop")
-                    with gr.Group(visible=False) as zone_grp:
-                        with gr.Row():
-                            zx = gr.Number(label="Zone x (%)", minimum=0,
-                                           maximum=100)
-                            zy = gr.Number(label="Zone y (%)", minimum=0,
-                                           maximum=100)
-                            zw = gr.Number(label="Largeur (%)", minimum=0,
-                                           maximum=100)
-                            zh = gr.Number(label="Hauteur (%)", minimum=0,
-                                           maximum=100)
-                        gr.Markdown(
-                            "*Zone en % de l'image (x,y = coin haut-gauche). "
-                            "Visible en direct sur l'aperçu filtré.*")
-                    msg_tb = gr.Textbox(
-                        label="Message affiché sur l'écran noir",
-                        placeholder="Scène Masquée", visible=False)
+
+                comps = {"ranges_state": ranges_state, "sel_state": sel_state,
+                         "page_state": page_state, "ranges_json": ranges_json,
+                         "cur_pos": cur_pos}
+
+                @gr.render(inputs=[ranges_state, sel_state, page_state])
+                def _render(ranges, selected, page):
+                    ranges_editor(ranges, selected, page, comps)
+
                 title_tb = gr.Textbox(label="Titre de la liste", value="Hide")
                 outs = gr.CheckboxGroup(
                     [OUT_VIDEO, OUT_RANGES], value=[OUT_VIDEO, OUT_RANGES],
@@ -653,58 +683,28 @@ def build_app():
                 ranges_out = gr.File(label="Fichier de plages (JSON)",
                                      interactive=False)
 
-        row_outs = [table, prev_table, ranges_json]
-        panel_outs = [sel_md, action_dd, zone_grp, zx, zy, zw, zh, msg_tb]
-
         analyse_btn.click(analyse,
                           inputs=[video_in, genre, detectors, stride, pad, gap,
                                   face_thr, body_thr, strict, keep_work],
-                          outputs=[log, table, state, prev_table, ranges_json])
+                          outputs=[log, ranges_state, state, ranges_json,
+                                   sel_state, page_state])
         import_btn.click(import_ranges,
                          inputs=[video_in, ranges_in, genre],
-                         outputs=[log, table, state, prev_table, ranges_json,
-                                  title_tb])
-        table.input(sync_table, inputs=[prev_table, table],
-                    outputs=row_outs)
-        table.select(on_select, inputs=[table],
-                     outputs=[sel_row, *panel_outs, seek_pos, panel])
-
-        # panneau d'édition de la plage sélectionnée
-        action_dd.input(set_action, inputs=[sel_row, action_dd, table],
-                        outputs=[*row_outs, sel_md, zone_grp,
-                                 zx, zy, zw, zh, msg_tb])
-        for z in (zx, zy, zw, zh):
-            z.input(set_zone, inputs=[sel_row, zx, zy, zw, zh, table],
-                    outputs=[*row_outs, sel_md])
-        msg_tb.input(set_message, inputs=[sel_row, msg_tb, table],
-                     outputs=[*row_outs, sel_md])
-        start_pos_btn.click(None, inputs=None, outputs=[cur_pos],
-                            js=JS_VIDEO_TIME) \
-            .then(set_start, inputs=[sel_row, cur_pos, table],
-                  outputs=[*row_outs, sel_md])
-        end_pos_btn.click(None, inputs=None, outputs=[cur_pos],
-                          js=JS_VIDEO_TIME) \
-            .then(set_end, inputs=[sel_row, cur_pos, table],
-                  outputs=[*row_outs, sel_md])
-        del_btn.click(delete_range, inputs=[sel_row, table],
-                      outputs=[*row_outs, sel_row, panel])
+                         outputs=[log, ranges_state, state, ranges_json,
+                                  sel_state, page_state, title_tb])
         add_btn.click(None, inputs=None, outputs=[cur_pos],
                       js=JS_VIDEO_TIME) \
-            .then(add_range, inputs=[cur_pos, table], outputs=row_outs)
+            .then(add_range, inputs=[cur_pos, ranges_state],
+                  outputs=[ranges_state, ranges_json, page_state])
 
-        # liaisons avec le lecteur (aperçu filtré + navigation)
+        # liaisons avec le lecteur (aperçu filtré en direct)
         ranges_json.change(None, inputs=[ranges_json], outputs=None,
                            js="(s) => { window.iasgSetRanges(s); }")
         apply_chk.change(None, inputs=[apply_chk], outputs=None,
                          js="(v) => { window.iasgSetApply(v); }")
-        seek_pos.change(None, inputs=[seek_pos], outputs=None,
-                        js="(t) => { const v = document.querySelector("
-                           "'#iasg-video video');"
-                           " if (v && t != null && isFinite(t))"
-                           " v.currentTime = Math.max(0, t); }")
 
         generate_btn.click(generate,
-                           inputs=[state, table, outs, title_tb],
+                           inputs=[state, ranges_state, outs, title_tb],
                            outputs=[log, video_out, ranges_out])
     return app
 
