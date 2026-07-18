@@ -166,8 +166,8 @@ Ce fichier est le **format d'échange éditable** : on peut désactiver une plag
 (`"enabled": false` — clé propre à ce logiciel, écrite seulement pour les
 plages désactivées, ignorée par les autres outils ; absente = active),
 ajuster `start`/`end`, changer l'action, ou ajouter une entrée — à la main,
-ou via le tableau de l'interface (qui sait aussi l'importer pour sauter
-l'analyse). `start`/`end` sont en secondes et acceptent aussi, à la lecture,
+ou via la liste de plages de l'interface (qui sait aussi l'importer pour
+sauter l'analyse). `start`/`end` sont en secondes et acceptent aussi, à la lecture,
 une chaîne « h:mm:ss.mmm » (conversions dans `src/timefmt.py`).
 `pipeline.render_from_ranges()` (CLI : `--ranges fichier.json`) rend ensuite
 la vidéo en appliquant toutes les actions, sans relancer la détection.

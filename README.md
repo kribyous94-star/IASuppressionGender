@@ -48,16 +48,18 @@ navigateur, en deux étapes :
 
 1. **Analyser** : glissez une vidéo, choisissez le genre à supprimer (réglages
    avancés dans l'accordéon), suivez le journal en direct. L'analyse produit
-   un **tableau de plages** (début/fin affichés **en secondes et en
-   h:mm:ss.mmm**, les deux formats éditables et synchronisés). Alternative
-   sans analyse : **importer un fichier de plages** existant (accordéon
-   « …ou importer des plages existantes »).
-2. **Éditer puis générer** : **cliquez sur une plage** — la vidéo saute à son
-   début et un panneau d'édition s'ouvre : **action** (cacher l'image
-   entière + message, cacher une zone x/y/w/h en % de l'image, couper le
-   son, sauter la plage), début/fin par saisie ou boutons **« = position
-   vidéo »**, suppression. Décochez « Active » pour désactiver une plage,
-   ajoutez-en une à la position courante (➕). L'**aperçu filtré** applique
+   une **liste de plages** en cartes, comme l'éditeur d'ummah-verse.
+   Alternative sans analyse : **importer un fichier de plages** existant
+   (accordéon « …ou importer des plages existantes »).
+2. **Éditer puis générer** : chaque carte de plage porte ses propres
+   commandes — **▶** (la vidéo saute au début de la plage), champs
+   **début/fin** (en secondes ou h:mm:ss) chacun avec son bouton **⏱ « =
+   position vidéo »** (utilisable sur toute plage, existante ou nouvelle),
+   **action** (cacher l'image entière + message, cacher une zone x/y/w/h en
+   % de l'image, couper le son, sauter la plage), case **Active**, **🗑**
+   suppression. **Sélection multiple** : cochez des plages (ou « Sélectionner
+   la page ») puis « Supprimer la sélection » ; liste paginée par 20.
+   ➕ ajoute une plage à la position courante. L'**aperçu filtré** applique
    les plages au lecteur en direct (écran noir, zones, son coupé, sauts) —
    décochez la case pour revoir la vidéo brute. Choisissez les sorties —
    **vidéo censurée**, **fichier de plages (JSON)**, ou les deux — puis
