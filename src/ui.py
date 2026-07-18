@@ -255,6 +255,12 @@ body { background: #0B0B0B; }
 .iasg-MUTE_AUDIO { border-left-color: #3B82F6 !important; }
 .iasg-SKIP       { border-left-color: #22C55E !important; }
 
+/* Carte en cours d'édition (✏️ Modifier) : bordure or */
+.iasg-edit {
+    border-color: rgba(201, 162, 77, .5) !important;
+    background: rgba(201, 162, 77, .05) !important;
+}
+
 /* Plage couvrant la position courante du lecteur : halo or */
 .iasg-now {
     border-color: rgba(201, 162, 77, .55) !important;
@@ -429,17 +435,28 @@ def toggle_sel(rid, val, selected):
     return sorted(sel)
 
 
-def delete_range(rid, ranges, selected, page):
+def start_edit(rid):
+    """✏️ Modifier : ouvre l'édition complète de la plage."""
+    return rid
+
+
+def stop_edit():
+    """✅ Terminé : referme l'édition."""
+    return None
+
+
+def delete_range(rid, ranges, selected, page, edit):
     ranges = [r for r in ranges or [] if r["id"] != rid]
     selected = [i for i in selected or [] if i != rid]
     return (ranges, selected, _ranges_json(ranges),
-            _clamp_page(page, ranges))
+            _clamp_page(page, ranges), None if edit == rid else edit)
 
 
-def delete_selected(ranges, selected, page):
+def delete_selected(ranges, selected, page, edit):
     sel = set(selected or [])
     ranges = [r for r in ranges or [] if r["id"] not in sel]
-    return ranges, [], _ranges_json(ranges), _clamp_page(page, ranges)
+    return (ranges, [], _ranges_json(ranges), _clamp_page(page, ranges),
+            None if edit in sel else edit)
 
 
 def toggle_page_sel(page_ids, all_selected, selected):
@@ -449,11 +466,14 @@ def toggle_page_sel(page_ids, all_selected, selected):
 
 
 def add_range(pos, ranges):
-    """➕ : nouvelle plage de 5 s à la position courante du lecteur."""
+    """➕ : nouvelle plage de 5 s à la position courante du lecteur,
+    ouverte directement en édition."""
     t = round(float(pos or 0), 3)
-    ranges = list(ranges or []) + [_new_range(t, t + 5.0)]
+    new = _new_range(t, t + 5.0)
+    ranges = list(ranges or []) + [new]
     return (ranges, _ranges_json(ranges),
-            _clamp_page(len(ranges), ranges))  # → dernière page
+            _clamp_page(len(ranges), ranges),  # → dernière page
+            new["id"])
 
 
 def page_delta(delta, page, ranges):
@@ -481,7 +501,7 @@ def analyse(video, genre, detectors, stride, pad, gap,
 
     for item, stats in _stream(worker):
         if stats is None:
-            yield (item,) + (gr.update(),) * 5
+            yield (item,) + (gr.update(),) * 6
             continue
         lines = item
         lines.append(f"✅ Analyse terminée : {len(stats['ranges'])} plage(s), "
@@ -492,7 +512,7 @@ def analyse(video, genre, detectors, stride, pad, gap,
         state = {"video": video, "gender": GENDER_CHOICES[genre],
                  "fps": stats["fps"], "total": stats["total"]}
         yield ("\n".join(lines[-LOG_MAX_LINES:]), ranges, state,
-               _ranges_json(ranges), [], 1)
+               _ranges_json(ranges), [], 1, None)
 
 
 def import_ranges(video, ranges_file, genre):
@@ -520,7 +540,7 @@ def import_ranges(video, ranges_file, genre):
               if ignored else "")
            + ". Vérifiez/éditez les plages puis lancez l'étape 2.")
     title = data.get("title") or gr.update()
-    return log, ranges, state, _ranges_json(ranges), [], 1, title
+    return log, ranges, state, _ranges_json(ranges), [], 1, None, title
 
 
 # ── Étape 2 : génération ─────────────────────────────────────────────────────
@@ -560,13 +580,32 @@ def generate(state, ranges, outs, title):
         yield "\n".join(lines[-LOG_MAX_LINES:]), stats["output"], ranges_file
 
 
-def ranges_editor(ranges, selected, page, C):
+def _summary(n, r):
+    """Ligne résumé d'une carte (mode lecture)."""
+    txt = (f"**{n}.** {fmt_hms(r['start'])} → {fmt_hms(r['end'])} "
+           f"({_fmt_s(r['start'])}–{_fmt_s(r['end'])} s) · "
+           f"**{ACTION_LABELS[r['action']]}**")
+    if r["action"] == "HIDE_VIDEO" and r.get("message"):
+        txt += f" · « {r['message']} »"
+    elif r["action"] == "HIDE_ZONE" and r.get("zone"):
+        z = r["zone"]
+        txt += f" · zone {z['x']:g},{z['y']:g},{z['w']:g},{z['h']:g} %"
+    if not r.get("enabled", True):
+        txt += " · *désactivée*"
+    return txt
+
+
+def ranges_editor(ranges, selected, page, edit, C):
     """Corps du @gr.render : liste des plages en cartes façon ummah-verse.
 
     C : composants persistants de build_app (états, JSON de l'aperçu,
-    position vidéo). Chaque carte porte ses propres commandes : sélection,
-    ▶ aller à la plage, début/fin (champ + bouton ⏱ « = position vidéo »),
-    action et champs associés (message / zone), case Active, suppression.
+    position vidéo). Chaque carte : sélection, ▶ aller à la plage, résumé,
+    case Active, ✏️ Modifier (ouvre l'édition complète : début/fin + ⏱
+    « = position vidéo », action, message/zone), 🗑 suppression.
+
+    Tous les composants ont un `key` stable (les événements survivent aux
+    re-rendus) et `interactive=True` explicite (dans un render, Gradio ne
+    devine pas correctement l'interactivité).
     """
     ranges = ranges or []
     sel = set(selected or [])
@@ -577,84 +616,140 @@ def ranges_editor(ranges, selected, page, C):
     all_sel = bool(page_ids) and all(i in sel for i in page_ids)
     ranges_state, sel_state = C["ranges_state"], C["sel_state"]
     page_state, ranges_json = C["page_state"], C["ranges_json"]
-    cur_pos = C["cur_pos"]
+    cur_pos, edit_state = C["cur_pos"], C["edit_state"]
+
+    def kw(key):
+        return {"key": key, "preserved_by_key": None}
 
     # barre d'outils : compteur, sélection de page, suppression en masse
     with gr.Row():
         gr.Markdown(f"**{len(ranges)} plage(s)**"
-                    + (f" — {len(sel)} sélectionnée(s)" if sel else ""))
+                    + (f" — {len(sel)} sélectionnée(s)" if sel else ""),
+                    **kw("bar-count"))
         if page_ids:
             psel_btn = gr.Button(
                 "☐ Désélectionner la page" if all_sel
                 else "☑ Sélectionner la page",
-                size="sm", scale=0, min_width=190)
+                size="sm", scale=0, min_width=190, **kw("bar-psel"))
             psel_btn.click(partial(toggle_page_sel, page_ids, all_sel),
                            inputs=[sel_state], outputs=[sel_state])
         if sel:
             dsel_btn = gr.Button(f"🗑 Supprimer la sélection ({len(sel)})",
                                  size="sm", scale=0, variant="stop",
-                                 min_width=200)
+                                 min_width=200, **kw("bar-dsel"))
             dsel_btn.click(delete_selected,
-                           inputs=[ranges_state, sel_state, page_state],
+                           inputs=[ranges_state, sel_state, page_state,
+                                   edit_state],
                            outputs=[ranges_state, sel_state, ranges_json,
-                                    page_state])
+                                    page_state, edit_state])
 
     if not ranges:
         gr.Markdown("*Aucune plage : lancez l'analyse, importez un fichier, "
-                    "ou ➕ ajoutez une plage à la main.*")
+                    "ou ➕ ajoutez une plage à la main.*", **kw("bar-empty"))
 
     for offset, r in enumerate(shown):
         rid = r["id"]
         n = (page - 1) * PAGE_SIZE + offset + 1
+        editing = (edit == rid)
         # elem_id : surlignage JS des plages actives — elem_classes : liseré
         # coloré par action (CSS de la charte)
-        with gr.Group(elem_id=f"iasg-card-{rid}",
-                      elem_classes=["iasg-card", f"iasg-{r['action']}"]):
+        classes = ["iasg-card", f"iasg-{r['action']}"]
+        if editing:
+            classes.append("iasg-edit")
+        with gr.Group(elem_id=f"iasg-card-{rid}", elem_classes=classes):
             with gr.Row():
                 sel_chk = gr.Checkbox(value=rid in sel, show_label=False,
-                                      container=False, scale=0, min_width=28)
-                goto_btn = gr.Button("▶", size="sm", scale=0, min_width=36)
-                gr.Markdown(f"**{n}.** {_fmt_s(r['start'])} s → "
-                            f"{_fmt_s(r['end'])} s")
+                                      container=False, scale=0, min_width=28,
+                                      interactive=True, **kw(f"sel-{rid}"))
+                goto_btn = gr.Button("▶", size="sm", scale=0, min_width=36,
+                                     **kw(f"go-{rid}"))
+                gr.Markdown(_summary(n, r), **kw(f"sum-{rid}"))
                 on_chk = gr.Checkbox(value=r["enabled"], label="Active",
-                                     container=False, scale=0, min_width=90)
+                                     container=False, scale=0, min_width=90,
+                                     interactive=True, **kw(f"on-{rid}"))
+                if editing:
+                    done_btn = gr.Button("✅ Terminé", size="sm", scale=0,
+                                         variant="primary", min_width=110,
+                                         **kw(f"done-{rid}"))
+                    done_btn.click(stop_edit, inputs=None,
+                                   outputs=[edit_state])
+                else:
+                    edit_btn = gr.Button("✏️ Modifier", size="sm", scale=0,
+                                         min_width=110, **kw(f"edit-{rid}"))
+                    edit_btn.click(partial(start_edit, rid), inputs=None,
+                                   outputs=[edit_state])
                 del_btn = gr.Button("🗑", size="sm", scale=0, min_width=36,
-                                    variant="stop")
-            with gr.Row():
-                start_tb = gr.Textbox(value=fmt_hms(r["start"]),
-                                      label="Début (s ou h:m:s)", scale=2,
-                                      min_width=110)
-                start_pos_btn = gr.Button("⏱", size="sm", scale=0,
-                                          min_width=36)
-                end_tb = gr.Textbox(value=fmt_hms(r["end"]),
-                                    label="Fin (s ou h:m:s)", scale=2,
-                                    min_width=110)
-                end_pos_btn = gr.Button("⏱", size="sm", scale=0, min_width=36)
-                action_dd = gr.Dropdown(list(ACTION_LABELS.values()),
-                                        value=ACTION_LABELS[r["action"]],
-                                        label="Action", scale=3, min_width=170)
-            if r["action"] == "HIDE_VIDEO":
-                msg_tb = gr.Textbox(value=r["message"],
-                                    label="Message affiché sur l'écran noir",
-                                    placeholder="Scène Masquée")
-                for ev in (msg_tb.submit, msg_tb.blur):
-                    ev(partial(set_message, rid),
-                       inputs=[msg_tb, ranges_state],
-                       outputs=[ranges_state, ranges_json])
-            elif r["action"] == "HIDE_ZONE":
-                zone = r["zone"] or dict(DEFAULT_ZONE)
-                with gr.Row():
-                    zs = [gr.Number(value=zone[k], label=lbl, minimum=0,
-                                    maximum=100, min_width=80)
-                          for k, lbl in (("x", "Zone x (%)"), ("y", "y (%)"),
-                                         ("w", "Largeur (%)"),
-                                         ("h", "Hauteur (%)"))]
-                for z in zs:
-                    for ev in (z.submit, z.blur):
-                        ev(partial(set_zone, rid),
-                           inputs=[*zs, ranges_state],
-                           outputs=[ranges_state, ranges_json])
+                                    variant="stop", **kw(f"del-{rid}"))
 
+            if editing:
+                with gr.Row():
+                    start_tb = gr.Textbox(value=fmt_hms(r["start"]),
+                                          label="Début (s ou h:m:s)", scale=2,
+                                          min_width=110, interactive=True,
+                                          **kw(f"start-{rid}"))
+                    start_pos_btn = gr.Button("⏱", size="sm", scale=0,
+                                              min_width=36,
+                                              **kw(f"spos-{rid}"))
+                    end_tb = gr.Textbox(value=fmt_hms(r["end"]),
+                                        label="Fin (s ou h:m:s)", scale=2,
+                                        min_width=110, interactive=True,
+                                        **kw(f"end-{rid}"))
+                    end_pos_btn = gr.Button("⏱", size="sm", scale=0,
+                                            min_width=36, **kw(f"epos-{rid}"))
+                    action_dd = gr.Dropdown(list(ACTION_LABELS.values()),
+                                            value=ACTION_LABELS[r["action"]],
+                                            label="Action", scale=3,
+                                            min_width=170, interactive=True,
+                                            **kw(f"act-{rid}"))
+                if r["action"] == "HIDE_VIDEO":
+                    msg_tb = gr.Textbox(value=r["message"],
+                                        label="Message affiché sur l'écran noir",
+                                        placeholder="Scène Masquée",
+                                        interactive=True, **kw(f"msg-{rid}"))
+                    for ev in (msg_tb.submit, msg_tb.blur):
+                        ev(partial(set_message, rid),
+                           inputs=[msg_tb, ranges_state],
+                           outputs=[ranges_state, ranges_json])
+                elif r["action"] == "HIDE_ZONE":
+                    zone = r["zone"] or dict(DEFAULT_ZONE)
+                    with gr.Row():
+                        zs = [gr.Number(value=zone[k], label=lbl, minimum=0,
+                                        maximum=100, min_width=80,
+                                        interactive=True, **kw(f"z{k}-{rid}"))
+                              for k, lbl in (("x", "Zone x (%)"),
+                                             ("y", "y (%)"),
+                                             ("w", "Largeur (%)"),
+                                             ("h", "Hauteur (%)"))]
+                    for z in zs:
+                        for ev in (z.submit, z.blur):
+                            ev(partial(set_zone, rid),
+                               inputs=[*zs, ranges_state],
+                               outputs=[ranges_state, ranges_json])
+
+                for ev in (start_tb.submit, start_tb.blur):
+                    ev(partial(set_bound, rid, "start"),
+                       inputs=[start_tb, ranges_state],
+                       outputs=[ranges_state, ranges_json])
+                for ev in (end_tb.submit, end_tb.blur):
+                    ev(partial(set_bound, rid, "end"),
+                       inputs=[end_tb, ranges_state],
+                       outputs=[ranges_state, ranges_json])
+                start_pos_btn.click(None, inputs=None, outputs=[cur_pos],
+                                    js=JS_VIDEO_TIME) \
+                    .then(partial(set_bound_pos, rid, "start"),
+                          inputs=[cur_pos, ranges_state],
+                          outputs=[ranges_state, ranges_json])
+                end_pos_btn.click(None, inputs=None, outputs=[cur_pos],
+                                  js=JS_VIDEO_TIME) \
+                    .then(partial(set_bound_pos, rid, "end"),
+                          inputs=[cur_pos, ranges_state],
+                          outputs=[ranges_state, ranges_json])
+                action_dd.input(partial(set_action, rid),
+                                inputs=[action_dd, ranges_state],
+                                outputs=[ranges_state, ranges_json])
+
+            # sélection, activation, navigation, suppression : toujours
+            # accessibles, sans passer par ✏️ Modifier
             sel_chk.input(partial(toggle_sel, rid),
                           inputs=[sel_chk, sel_state], outputs=[sel_state])
             on_chk.input(partial(set_enabled, rid),
@@ -663,39 +758,19 @@ def ranges_editor(ranges, selected, page, C):
             goto_btn.click(  # aller à la plage (côté client, sans requête)
                 None, inputs=None, outputs=None,
                 js=f"() => window.iasgSeek({r['start']})")
-            for ev in (start_tb.submit, start_tb.blur):
-                ev(partial(set_bound, rid, "start"),
-                   inputs=[start_tb, ranges_state],
-                   outputs=[ranges_state, ranges_json])
-            for ev in (end_tb.submit, end_tb.blur):
-                ev(partial(set_bound, rid, "end"),
-                   inputs=[end_tb, ranges_state],
-                   outputs=[ranges_state, ranges_json])
-            start_pos_btn.click(None, inputs=None, outputs=[cur_pos],
-                                js=JS_VIDEO_TIME) \
-                .then(partial(set_bound_pos, rid, "start"),
-                      inputs=[cur_pos, ranges_state],
-                      outputs=[ranges_state, ranges_json])
-            end_pos_btn.click(None, inputs=None, outputs=[cur_pos],
-                              js=JS_VIDEO_TIME) \
-                .then(partial(set_bound_pos, rid, "end"),
-                      inputs=[cur_pos, ranges_state],
-                      outputs=[ranges_state, ranges_json])
-            action_dd.input(partial(set_action, rid),
-                            inputs=[action_dd, ranges_state],
-                            outputs=[ranges_state, ranges_json])
             del_btn.click(partial(delete_range, rid),
-                          inputs=[ranges_state, sel_state, page_state],
+                          inputs=[ranges_state, sel_state, page_state,
+                                  edit_state],
                           outputs=[ranges_state, sel_state, ranges_json,
-                                   page_state])
+                                   page_state, edit_state])
 
     if pages > 1:
         with gr.Row():
             prev_btn = gr.Button("◀ Page précédente", size="sm",
-                                 interactive=page > 1)
-            gr.Markdown(f"Page **{page} / {pages}**")
+                                 interactive=page > 1, **kw("pg-prev"))
+            gr.Markdown(f"Page **{page} / {pages}**", **kw("pg-info"))
             next_btn = gr.Button("Page suivante ▶", size="sm",
-                                 interactive=page < pages)
+                                 interactive=page < pages, **kw("pg-next"))
             prev_btn.click(partial(page_delta, -1),
                            inputs=[page_state, ranges_state],
                            outputs=[page_state])
@@ -723,6 +798,7 @@ def build_app():
         ranges_state = gr.State([])
         sel_state = gr.State([])
         page_state = gr.State(1)
+        edit_state = gr.State()  # id de la plage en cours d'édition (✏️)
         cur_pos = gr.Number(visible=False)   # position vidéo lue côté client
         ranges_json = gr.Textbox(visible=False)  # plages → aperçu filtré JS
         monitor = gr.HTML(system_stats())
@@ -779,15 +855,16 @@ def build_app():
 
                 comps = {"ranges_state": ranges_state, "sel_state": sel_state,
                          "page_state": page_state, "ranges_json": ranges_json,
-                         "cur_pos": cur_pos}
+                         "cur_pos": cur_pos, "edit_state": edit_state}
 
                 # box défilante : on manipule les plages sans perdre de vue
                 # la vidéo à gauche (pagination conservée, dans la box)
                 with gr.Column(elem_id="iasg-ranges-box"):
 
-                    @gr.render(inputs=[ranges_state, sel_state, page_state])
-                    def _render(ranges, selected, page):
-                        ranges_editor(ranges, selected, page, comps)
+                    @gr.render(inputs=[ranges_state, sel_state, page_state,
+                                       edit_state])
+                    def _render(ranges, selected, page, edit):
+                        ranges_editor(ranges, selected, page, edit, comps)
 
                 title_tb = gr.Textbox(label="Titre de la liste", value="Hide")
                 outs = gr.CheckboxGroup(
@@ -802,15 +879,16 @@ def build_app():
                           inputs=[video_in, genre, detectors, stride, pad, gap,
                                   face_thr, body_thr, strict, keep_work],
                           outputs=[log, ranges_state, state, ranges_json,
-                                   sel_state, page_state])
+                                   sel_state, page_state, edit_state])
         import_btn.click(import_ranges,
                          inputs=[video_in, ranges_in, genre],
                          outputs=[log, ranges_state, state, ranges_json,
-                                  sel_state, page_state, title_tb])
+                                  sel_state, page_state, edit_state,
+                                  title_tb])
         add_btn.click(None, inputs=None, outputs=[cur_pos],
                       js=JS_VIDEO_TIME) \
             .then(add_range, inputs=[cur_pos, ranges_state],
-                  outputs=[ranges_state, ranges_json, page_state])
+                  outputs=[ranges_state, ranges_json, page_state, edit_state])
 
         # liaisons avec le lecteur (aperçu filtré en direct)
         ranges_json.change(None, inputs=[ranges_json], outputs=None,
