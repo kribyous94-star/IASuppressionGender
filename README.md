@@ -44,7 +44,10 @@ réellement utilisable et se replie automatiquement sur le CPU sinon. Relancer
 ```
 
 Ouvre une interface web **locale** (127.0.0.1, aucun accès externe) dans le
-navigateur, en deux étapes :
+navigateur — thème **sombre et or** repris de la charte ummah-verse, plages
+dans une **box défilante** (la vidéo reste visible pendant l'édition), carte
+de chaque plage avec un **liseré coloré selon l'action** et un **halo doré**
+quand la lecture est dans la plage. Deux étapes :
 
 1. **Analyser** : glissez une vidéo, choisissez le genre à supprimer (réglages
    avancés dans l'accordéon), suivez le journal en direct. L'analyse produit

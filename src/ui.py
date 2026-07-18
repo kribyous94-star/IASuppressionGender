@@ -59,6 +59,13 @@ HEAD_JS = """
 <script>
 (function () {
   const S = { ranges: [], apply: true };
+
+  // Thème sombre forcé (charte ummah-verse : sombre + or)
+  const forceDark = () => {
+    if (document.body && !document.body.classList.contains('dark'))
+      document.body.classList.add('dark');
+  };
+  document.addEventListener('DOMContentLoaded', forceDark);
   window.iasgSetRanges = (json) => {
     try { S.ranges = JSON.parse(json || "[]"); } catch { S.ranges = []; }
     update();
@@ -100,6 +107,18 @@ HEAD_JS = """
     const v = video();
     if (!v) return;
     const ov = overlay(v), t = v.currentTime;
+
+    // surlignage doré des cartes dont la plage couvre la position courante
+    // (informationnel : indépendant de l'aperçu filtré, comme ummah-verse)
+    const nowIds = new Set();
+    for (const r of S.ranges)
+      if (r.enabled !== false && t >= r.start && t < r.end)
+        nowIds.add(String(r.id));
+    document.querySelectorAll('.iasg-card').forEach((el) => {
+      el.classList.toggle('iasg-now',
+                          nowIds.has(el.id.replace('iasg-card-', '')));
+    });
+
     let cover = null; const zones = []; let mute = false;
     if (S.apply) {
       for (const r of S.ranges) {
@@ -116,8 +135,9 @@ HEAD_JS = """
     let html = '';
     if (cover) {
       html = '<div style="position:absolute;inset:0;background:#000;' +
-        'display:flex;align-items:center;justify-content:center;color:#ddd;' +
-        'text-align:center;padding:1em;">' +
+        'display:flex;align-items:center;justify-content:center;' +
+        'color:#F5F1E8;text-align:center;padding:1em;' +
+        'letter-spacing:.03em;">' +
         esc(cover.message || 'Scène Masquée') + '</div>';
     } else {
       const fb = zones.length ? frameBox(v) : null;
@@ -131,6 +151,7 @@ HEAD_JS = """
   }
 
   setInterval(() => {  // (ré)attache le handler quand le lecteur (ré)apparaît
+    forceDark();
     const v = video();
     if (v && !v.dataset.iasg) {
       v.dataset.iasg = '1';
@@ -140,6 +161,107 @@ HEAD_JS = """
   }, 800);
 })();
 </script>
+"""
+
+# Charte graphique ummah-verse (globals.css du projet) : fond noir #0B0B0B,
+# texte ivoire #F5F1E8, accent or #C9A24D (clair #D4B366 / foncé #A88A3D),
+# cartes translucides, liseré coloré par action (mêmes teintes que l'éditeur).
+# Appliquée via les variables de thème Gradio + classes propres (iasg-*).
+CSS = """
+gradio-app, .gradio-container {
+    --body-background-fill: #0B0B0B;
+    --background-fill-primary: #111111;
+    --background-fill-secondary: #1A1A1A;
+    --block-background-fill: #131313;
+    --panel-background-fill: #131313;
+    --body-text-color: #F5F1E8;
+    --body-text-color-subdued: rgba(245, 241, 232, .6);
+    --block-title-text-color: rgba(245, 241, 232, .85);
+    --block-label-text-color: rgba(245, 241, 232, .6);
+    --block-info-text-color: rgba(245, 241, 232, .5);
+    --block-border-color: rgba(255, 255, 255, .08);
+    --border-color-primary: rgba(255, 255, 255, .08);
+    --border-color-accent: rgba(201, 162, 77, .4);
+    --color-accent: #C9A24D;
+    --color-accent-soft: rgba(201, 162, 77, .16);
+    --button-primary-background-fill:
+        linear-gradient(135deg, #D4B366 0%, #C9A24D 55%, #A88A3D 100%);
+    --button-primary-background-fill-hover:
+        linear-gradient(135deg, #E2C57E 0%, #D4B366 55%, #C9A24D 100%);
+    --button-primary-text-color: #171204;
+    --button-primary-border-color: rgba(201, 162, 77, .5);
+    --button-secondary-background-fill: #1F1F1F;
+    --button-secondary-background-fill-hover: #2A2A2A;
+    --button-secondary-text-color: #F5F1E8;
+    --button-secondary-border-color: rgba(255, 255, 255, .12);
+    --button-cancel-background-fill: rgba(229, 72, 77, .15);
+    --button-cancel-background-fill-hover: rgba(229, 72, 77, .3);
+    --button-cancel-text-color: #F1707A;
+    --button-cancel-border-color: rgba(229, 72, 77, .4);
+    --input-background-fill: #1A1A1A;
+    --input-border-color: rgba(255, 255, 255, .12);
+    --input-border-color-focus: rgba(201, 162, 77, .6);
+    --input-placeholder-color: rgba(245, 241, 232, .35);
+    --checkbox-background-color: #1A1A1A;
+    --checkbox-background-color-selected: #C9A24D;
+    --checkbox-border-color: rgba(255, 255, 255, .25);
+    --checkbox-border-color-selected: #C9A24D;
+    --slider-color: #C9A24D;
+    --link-text-color: #D4B366;
+    --link-text-color-hover: #E2C57E;
+    --loader-color: #C9A24D;
+    --error-background-fill: rgba(229, 72, 77, .12);
+    background: #0B0B0B;
+    color: #F5F1E8;
+    color-scheme: dark;
+}
+body { background: #0B0B0B; }
+
+/* Titre en dégradé or, comme .text-gradient-gold d'ummah-verse */
+#iasg-title h1 {
+    background: linear-gradient(135deg, #D4B366 0%, #C9A24D 50%, #A88A3D 100%);
+    -webkit-background-clip: text;
+    background-clip: text;
+    -webkit-text-fill-color: transparent;
+    color: transparent;
+    letter-spacing: .02em;
+}
+
+/* La vidéo reste visible : colonne gauche collante, plages dans une box
+   défilante à droite (pagination conservée à l'intérieur) */
+#iasg-left { position: sticky; top: 10px; align-self: flex-start; }
+#iasg-ranges-box {
+    max-height: 68vh;
+    overflow-y: auto;
+    padding: 8px;
+    border: 1px solid rgba(201, 162, 77, .18);
+    border-radius: 10px;
+    background: rgba(255, 255, 255, .02);
+    scrollbar-width: thin;
+    scrollbar-color: rgba(201, 162, 77, .4) transparent;
+}
+
+/* Cartes de plage : fond translucide + liseré coloré par action
+   (mêmes teintes que ACTION_COLORS du FilterListEditorModal) */
+.iasg-card {
+    border: 1px solid rgba(255, 255, 255, .07) !important;
+    border-left-width: 3px !important;
+    background: rgba(255, 255, 255, .03) !important;
+    transition: border-color .15s, box-shadow .15s, background .15s;
+}
+.iasg-card:hover { border-color: rgba(201, 162, 77, .3) !important; }
+.iasg-HIDE_VIDEO { border-left-color: #E5484D !important; }
+.iasg-HIDE_ZONE  { border-left-color: #EAB308 !important; }
+.iasg-MUTE_AUDIO { border-left-color: #3B82F6 !important; }
+.iasg-SKIP       { border-left-color: #22C55E !important; }
+
+/* Plage couvrant la position courante du lecteur : halo or */
+.iasg-now {
+    border-color: rgba(201, 162, 77, .55) !important;
+    background: rgba(201, 162, 77, .07) !important;
+    box-shadow: 0 0 0 1px rgba(201, 162, 77, .3),
+                0 0 24px rgba(201, 162, 77, .12);
+}
 """
 
 
@@ -484,7 +606,10 @@ def ranges_editor(ranges, selected, page, C):
     for offset, r in enumerate(shown):
         rid = r["id"]
         n = (page - 1) * PAGE_SIZE + offset + 1
-        with gr.Group():
+        # elem_id : surlignage JS des plages actives — elem_classes : liseré
+        # coloré par action (CSS de la charte)
+        with gr.Group(elem_id=f"iasg-card-{rid}",
+                      elem_classes=["iasg-card", f"iasg-{r['action']}"]):
             with gr.Row():
                 sel_chk = gr.Checkbox(value=rid in sel, show_label=False,
                                       container=False, scale=0, min_width=28)
@@ -591,7 +716,8 @@ def build_app():
             "couper le son, sauter), sélection multiple pour supprimer en "
             "masse, aperçu filtré en direct — puis générez la vidéo censurée "
             "et/ou le fichier de plages (format partagé « ummahverse-filter-"
-            "list »). Traitement 100 % local et hors ligne.")
+            "list »). Traitement 100 % local et hors ligne.",
+            elem_id="iasg-title")
 
         state = gr.State()
         ranges_state = gr.State([])
@@ -604,7 +730,7 @@ def build_app():
         timer.tick(system_stats, outputs=[monitor], show_progress="hidden")
 
         with gr.Row():
-            with gr.Column():
+            with gr.Column(elem_id="iasg-left"):
                 video_in = gr.Video(label="Vidéo d'entrée", sources=["upload"],
                                     elem_id="iasg-video")
                 apply_chk = gr.Checkbox(
@@ -655,9 +781,13 @@ def build_app():
                          "page_state": page_state, "ranges_json": ranges_json,
                          "cur_pos": cur_pos}
 
-                @gr.render(inputs=[ranges_state, sel_state, page_state])
-                def _render(ranges, selected, page):
-                    ranges_editor(ranges, selected, page, comps)
+                # box défilante : on manipule les plages sans perdre de vue
+                # la vidéo à gauche (pagination conservée, dans la box)
+                with gr.Column(elem_id="iasg-ranges-box"):
+
+                    @gr.render(inputs=[ranges_state, sel_state, page_state])
+                    def _render(ranges, selected, page):
+                        ranges_editor(ranges, selected, page, comps)
 
                 title_tb = gr.Textbox(label="Titre de la liste", value="Hide")
                 outs = gr.CheckboxGroup(
@@ -704,7 +834,7 @@ def main():
     build_app().queue().launch(server_name="127.0.0.1",
                                server_port=args.port,
                                inbrowser=not args.no_browser,
-                               share=False, head=HEAD_JS)
+                               share=False, head=HEAD_JS, css=CSS)
 
 
 if __name__ == "__main__":
