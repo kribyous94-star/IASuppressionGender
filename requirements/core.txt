@@ -1,5 +1,8 @@
 # venv core — orchestration + rendu + interface (aucun modèle IA)
-numpy>=1.24
+# numpy : borné sous Linux (compat opencv testée) ; libre sous Windows où
+# seuls les wheels récents existent pour les Python récents (cf. install.ps1).
+numpy<2.3 ; sys_platform != "win32"
+numpy>=1.24 ; sys_platform == "win32"
 opencv-python>=4.9
 imageio-ffmpeg>=0.5
 tqdm>=4.66
