@@ -1,6 +1,10 @@
 # venv face — InsightFace (SCRFD + genre/âge) sur onnxruntime
-# NB : onnxruntime (CPU) est installé par install.sh ; --gpu installe onnxruntime-gpu.
-numpy<2
+# NB : onnxruntime (CPU) est installé par install.sh/install.ps1 ;
+# --gpu installe onnxruntime-gpu.
+# numpy : <2 sous Linux (requis par insightface 0.7.3 avec les wheels
+# testés) ; libre sous Windows où install.ps1 force un wheel binaire récent.
+numpy<2 ; sys_platform != "win32"
+numpy>=1.24 ; sys_platform == "win32"
 opencv-python>=4.9
 insightface==0.7.3
 tqdm>=4.66
