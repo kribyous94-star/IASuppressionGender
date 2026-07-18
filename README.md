@@ -21,6 +21,8 @@ de cas : visage visible, visage caché, personne de dos, personne partielle, etc
 
 ## Installation
 
+### Linux / macOS
+
 ```bash
 ./install.sh          # CPU (par défaut)
 ./install.sh --gpu    # variantes GPU (CUDA) de torch/onnxruntime
@@ -35,12 +37,28 @@ seul le pilote NVIDIA doit être présent. L'installeur vérifie que le GPU est
 réellement utilisable et se replie automatiquement sur le CPU sinon. Relancer
 `install.sh` avec ou sans `--gpu` bascule proprement entre les deux variantes.
 
+### Windows
+
+```bat
+install.bat           # détection GPU automatique (recommandé)
+install.bat --gpu     # forcer GPU NVIDIA (CUDA Toolkit requis)
+install.bat --cpu     # forcer CPU
+```
+
+(`install.bat` appelle `install.ps1` ; utilisable aussi directement en
+PowerShell : `.\install.ps1 [--gpu|--cpu]`.) Nécessite Python 3.10–3.14
+avec py/python dans le PATH. Contrairement à Linux, le mode GPU s'appuie sur
+le **CUDA Toolkit système** (onnxruntime-gpu le détecte automatiquement).
+Les mêmes fichiers `requirements/` servent aux deux plateformes (marqueurs
+`sys_platform` pour les différences, ex. bornes numpy).
+
 ## Utilisation
 
 ### Interface graphique (recommandé)
 
 ```bash
-./run.sh
+./run.sh              # Linux/macOS
+run.bat               # Windows (ou .\run.ps1 ; options -Port N, -NoBrowser)
 ```
 
 Ouvre une interface web **locale** (127.0.0.1, aucun accès externe) dans le
@@ -76,6 +94,9 @@ Options : `--port N`, `--no-browser`.
 ./cli.sh -i video.mp4 --ranges resultat.plages.json  # re-rendu depuis un fichier
                                                # de plages édité (pas d'analyse)
 ```
+
+Sous Windows : `cli.bat` / `.\cli.ps1` avec les mêmes options
+(ex. `cli.bat -i video.mp4 -g femme`).
 
 Options principales (voir `./cli.sh --help` pour tout) :
 
@@ -125,6 +146,9 @@ IASuppressionGender/
 ├── install.sh            # installe venvs + modèles, tout DANS le dossier
 ├── run.sh                # lance l'interface graphique (mode offline forcé)
 ├── cli.sh                # lance la ligne de commande (mode offline forcé)
+├── install.bat/.ps1      # équivalents Windows des trois scripts ci-dessus
+├── run.bat/.ps1          #   (mêmes contraintes : tout dans le dossier,
+├── cli.bat/.ps1          #    hors ligne au runtime)
 ├── requirements/         # dépendances par venv (core/face/body)
 ├── src/
 │   ├── pipeline.py       # moteur : détecteurs → fusion → rendu (venv core)

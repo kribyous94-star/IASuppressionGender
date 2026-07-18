@@ -223,6 +223,21 @@ Les deux exportent les mêmes variables de cache + `HF_HUB_OFFLINE=1`, puis :
   analytics désactivées). Journal en direct, sorties dans `./output/`.
 - `cli.sh` → `venvs/core/bin/python src/main.py "$@"` : la CLI historique.
 
+### 5.3 Variante Windows (`install.ps1`, `run.ps1`, `cli.ps1` + `.bat`)
+
+Mêmes rôles et mêmes contraintes que les scripts shell (tout dans le
+dossier, hors ligne au runtime) ; les `.bat` sont des lanceurs pour un
+double-clic ou cmd. Différences assumées :
+- venvs en `venvs/<nom>/Scripts/python.exe` — le code Python passe par
+  `pipeline._venv_python()` qui choisit le bon chemin selon la plateforme ;
+- mode GPU via le **CUDA Toolkit système** (pas de libs CUDA pip ni de
+  `LD_LIBRARY_PATH` — `detector_env()` ne fait rien de spécial sur Windows) ;
+- numpy forcé en wheel binaire ; les différences de bornes sont portées par
+  des marqueurs `sys_platform` dans `requirements/*.txt`, communs aux deux
+  plateformes ;
+- `src/ui.py` patche le ProactorEventLoop (WinError 10054 bénin quand le
+  navigateur ferme la connexion).
+
 ## 6. Ajouter un détecteur (checklist)
 
 1. `requirements/<nom>.txt` + création du venv dans `install.sh`.
