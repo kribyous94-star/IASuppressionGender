@@ -135,7 +135,8 @@ Sortie (seules les frames avec détections apparaissent) :
 
 La fusion produit des plages en secondes, exportables en JSON
 (`<sortie>.plages.json`) au format **« ummahverse-filter-list »**, partagé
-avec d'autres logiciels :
+avec ummah-verse (mêmes actions et mêmes champs que son éditeur de listes
+de filtres) :
 
 ```json
 {
@@ -147,32 +148,45 @@ avec d'autres logiciels :
     {"id": "rmrmacwft2", "end": 3.48, "start": 1.2,
      "action": "HIDE_VIDEO", "message": "Scène Masquée"},
     {"id": "rmrmadwgn3", "end": 12.5, "start": 10,
-     "action": "HIDE_VIDEO", "message": "Scène Masquée", "enabled": false}
+     "action": "HIDE_ZONE", "zone": {"x": 25, "y": 25, "w": 50, "h": 50}},
+    {"id": "rmrmaewhp4", "end": 20, "start": 15,
+     "action": "MUTE_AUDIO", "enabled": false}
   ]
 }
 ```
 
+Quatre **actions** : `HIDE_VIDEO` (image entière cachée — champ `message`
+affiché sur l'écran noir, défaut « Scène Masquée »), `HIDE_ZONE` (rectangle
+noir — champ `zone` {x, y, w, h} en % de l'image, coin haut-gauche),
+`MUTE_AUDIO` (son coupé) et `SKIP` (plage supprimée de la lecture — vidéo
+**et** audio coupés au rendu). L'analyse produit des plages `HIDE_VIDEO` ;
+l'action de chaque plage est ensuite modifiable dans l'interface.
+
 Ce fichier est le **format d'échange éditable** : on peut désactiver une plage
 (`"enabled": false` — clé propre à ce logiciel, écrite seulement pour les
 plages désactivées, ignorée par les autres outils ; absente = active),
-ajuster `start`/`end`, ou ajouter une entrée — à la main, ou via le tableau
-de l'interface (qui sait aussi l'importer pour sauter l'analyse).
-`start`/`end` sont en secondes et acceptent aussi, à la lecture, une chaîne
-« h:mm:ss.mmm » (conversions dans `src/timefmt.py`). À l'export, `action` et
-`message` valent par défaut `HIDE_VIDEO` / « Scène Masquée » ; à l'import,
-seules les plages dont l'action est `HIDE_VIDEO` (ou absente) sont retenues.
-`pipeline.render_from_ranges()` (CLI : `--ranges fichier.json`)
-rend ensuite la vidéo sans relancer la détection.
+ajuster `start`/`end`, changer l'action, ou ajouter une entrée — à la main,
+ou via le tableau de l'interface (qui sait aussi l'importer pour sauter
+l'analyse). `start`/`end` sont en secondes et acceptent aussi, à la lecture,
+une chaîne « h:mm:ss.mmm » (conversions dans `src/timefmt.py`).
+`pipeline.render_from_ranges()` (CLI : `--ranges fichier.json`) rend ensuite
+la vidéo en appliquant toutes les actions, sans relancer la détection.
 Les sorties sont sélectionnables : vidéo, fichier de plages, ou les deux
 (CLI : `--out video|plages|both` ; interface : cases à cocher).
 
 ### 4.6 Rendu (`src/render.py`, venv core)
 
-- Relecture de la vidéo avec OpenCV, écriture d'une frame noire (même résolution)
-  pour chaque index flagué, copie telle quelle sinon.
-- Remux : `ffmpeg -i rendu.mp4 -i original -map 0:v -map 1:a? -c:a copy`
-  avec le binaire statique fourni par `imageio-ffmpeg` (dans le venv core,
-  donc dans le dossier). La sortie garde l'audio, la durée et le fps d'origine.
+- `fusion.render_plan()` convertit les plages (toutes actions) en plan de
+  rendu : frames à noircir (`HIDE_VIDEO`), rectangles par frame
+  (`HIDE_ZONE`), frames supprimées (`SKIP`), plages audio à couper
+  (`MUTE_AUDIO`) ou à découper (`SKIP`).
+- Relecture de la vidéo avec OpenCV : frame noire, rectangle(s) noir(s)
+  dessiné(s), frame non écrite (saut), ou copie telle quelle.
+- Remux avec le binaire statique fourni par `imageio-ffmpeg` (dans le venv
+  core, donc dans le dossier) : audio copié tel quel s'il n'y a ni mute ni
+  saut ; sinon ré-encodé avec `volume=0` sur les plages `MUTE_AUDIO` et
+  `aselect`/`asetpts` pour découper les plages `SKIP` (audio et vidéo
+  restent synchrones, la durée diminue d'autant).
 
 ## 5. Scripts
 

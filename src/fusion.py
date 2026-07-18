@@ -74,13 +74,20 @@ def spans_to_seconds(spans, fps):
              "enabled": True} for a, b in spans]
 
 
-def seconds_to_frames(ranges, fps, total_frames):
-    """Plages en secondes (éventuellement éditées à la main) → set de frames.
+def render_plan(ranges, fps, total_frames):
+    """Plages en secondes (toutes actions) → plan de rendu pour render.py.
 
     start/end acceptent un nombre de secondes ou une chaîne « h:mm:ss.mmm ».
-    Les plages désactivées (enabled: false) ou invalides sont ignorées.
+    Les plages désactivées (enabled: false), invalides ou d'action inconnue
+    sont ignorées. Renvoie :
+      black   : set de frames à noircir (HIDE_VIDEO)
+      zones   : {frame: [zone {x,y,w,h en % de l'image}, …]} (HIDE_ZONE)
+      skip    : set de frames à supprimer (SKIP)
+      skip_s  : plages SKIP en secondes [(début, fin), …] (coupe audio)
+      mute_s  : plages MUTE_AUDIO en secondes [(début, fin), …]
     """
-    frames = set()
+    plan = {"black": set(), "zones": {}, "skip": set(),
+            "skip_s": [], "mute_s": []}
     for r in ranges:
         if not r.get("enabled", True):
             continue
@@ -89,8 +96,18 @@ def seconds_to_frames(ranges, fps, total_frames):
             continue
         a = max(0, int(start * fps))
         b = min(total_frames - 1, math.ceil(end * fps) - 1)
-        frames.update(range(a, b + 1))
-    return frames
+        action = r.get("action", "HIDE_VIDEO")
+        if action == "HIDE_VIDEO":
+            plan["black"].update(range(a, b + 1))
+        elif action == "HIDE_ZONE" and r.get("zone"):
+            for i in range(a, b + 1):
+                plan["zones"].setdefault(i, []).append(r["zone"])
+        elif action == "SKIP":
+            plan["skip"].update(range(a, b + 1))
+            plan["skip_s"].append((round(start, 3), round(end, 3)))
+        elif action == "MUTE_AUDIO":
+            plan["mute_s"].append((round(start, 3), round(end, 3)))
+    return plan
 
 
 def _to_spans(sorted_indices):
