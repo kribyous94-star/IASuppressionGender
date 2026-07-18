@@ -1,11 +1,28 @@
 # IASuppressionGender — lance l'interface graphique (Windows, 100 % hors ligne).
-# Options : -Port N, -NoBrowser
+# Options : --port N, --no-browser (graphies -Port / -NoBrowser acceptees).
 # Pour la ligne de commande : .\cli.ps1 -i video.mp4 -g femme
 
-param(
-    [int]   $Port      = 7860,
-    [switch]$NoBrowser
-)
+# Options analysees a la main (pas de param()) : memes drapeaux que run.sh
+# (--port, --no-browser), tout en acceptant le style PowerShell (-Port).
+$Port      = 7860
+$NoBrowser = $false
+for ($i = 0; $i -lt $args.Count; $i++) {
+    switch -Regex ($args[$i]) {
+        '^--?port$' {
+            $i++
+            if ($i -ge $args.Count) {
+                Write-Host "[erreur] --port attend un numero" -ForegroundColor Red
+                exit 1
+            }
+            $Port = [int]$args[$i]
+        }
+        '^--?no-?browser$' { $NoBrowser = $true }
+        default {
+            Write-Host "[erreur] option inconnue : $($args[$i]) (options : --port N, --no-browser)" -ForegroundColor Red
+            exit 1
+        }
+    }
+}
 
 $ROOT = $PSScriptRoot
 $PY   = "$ROOT\venvs\core\Scripts\python.exe"

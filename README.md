@@ -58,7 +58,7 @@ Les mêmes fichiers `requirements/` servent aux deux plateformes (marqueurs
 
 ```bash
 ./run.sh              # Linux/macOS
-run.bat               # Windows (ou .\run.ps1 ; options -Port N, -NoBrowser)
+run.bat               # Windows (ou .\run.ps1) — mêmes options : --port N, --no-browser
 ```
 
 Ouvre une interface web **locale** (127.0.0.1, aucun accès externe) dans le

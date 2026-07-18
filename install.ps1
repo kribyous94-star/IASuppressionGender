@@ -15,7 +15,21 @@
 #   - Pour GPU : CUDA Toolkit 12.x + pilote NVIDIA recents
 #       https://developer.nvidia.com/cuda-downloads
 
-param([switch]$gpu, [switch]$cpu)
+# Options analysees a la main (pas de param()) : les .bat transmettent
+# "--gpu"/"--cpu" que PowerShell -File ne sait pas lier a des switches.
+# On accepte les deux graphies : --gpu/-gpu, --cpu/-cpu.
+$gpu = $false
+$cpu = $false
+foreach ($a in $args) {
+    switch -Regex ($a) {
+        '^--?gpu$' { $gpu = $true }
+        '^--?cpu$' { $cpu = $true }
+        default    {
+            Write-Host "[erreur] option inconnue : $a (options : --gpu, --cpu)" -ForegroundColor Red
+            exit 1
+        }
+    }
+}
 
 $ROOT = $PSScriptRoot
 
@@ -137,12 +151,22 @@ info "venv face : insightface + onnxruntime"
 if ($LASTEXITCODE -ne 0) { err "Impossible d'installer le wheel numpy (venv 'face')." }
 
 # Installer la bonne variante onnxruntime (appel direct, pas via pipin,
-# pour eviter un bug de splatting PS5.1 avec variable scalaire)
+# pour eviter un bug de splatting PS5.1 avec variable scalaire).
+# Les variantes CPU/GPU fournissent le MEME module Python : elles ne doivent
+# jamais cohabiter, et une desinstallation partielle laisse un module casse.
+# Si l'etat installe ne correspond pas exactement a la variante voulue, on
+# retire TOUJOURS les deux puis on reinstalle (meme logique qu'install.sh —
+# un simple "pip install" repondrait "deja satisfait" sans rien reparer).
 $ORT_WANTED = if ($gpu) { "onnxruntime-gpu" } else { "onnxruntime" }
-$ORT_WRONG  = if ($gpu) { "onnxruntime"     } else { "onnxruntime-gpu" }
-& "$ROOT\venvs\face\Scripts\pip.exe" uninstall -y -q $ORT_WRONG 2>$null
-& "$ROOT\venvs\face\Scripts\pip.exe" install $ORT_WANTED
-if ($LASTEXITCODE -ne 0) { err "Impossible d'installer $ORT_WANTED (venv 'face')." }
+$ortInstalled = @(& "$ROOT\venvs\face\Scripts\pip.exe" list --format=freeze 2>$null |
+    Where-Object { $_ -match '^onnxruntime(-gpu)?==' } |
+    ForEach-Object { ($_ -split '==')[0] } | Sort-Object)
+$ORT_STATE = $ortInstalled -join "+"
+if ($ORT_STATE -ne $ORT_WANTED) {
+    & "$ROOT\venvs\face\Scripts\pip.exe" uninstall -y -q onnxruntime onnxruntime-gpu 2>$null
+    & "$ROOT\venvs\face\Scripts\pip.exe" install $ORT_WANTED
+    if ($LASTEXITCODE -ne 0) { err "Impossible d'installer $ORT_WANTED (venv 'face')." }
+}
 
 # Sur Windows, CUDA est fourni par le Toolkit systeme (pas par des paquets pip
 # nvidia-* comme sur Linux). onnxruntime-gpu le detecte automatiquement.
